@@ -21,18 +21,18 @@ onMounted(() => run(load));
 </script>
 <template>
   <section class="surface manager">
-    <div class="surface-header"><div><h2>自定义功能插件</h2><p>从本机目录添加 plugin.json。声明式插件不执行第三方脚本，添加和停用立即生效。</p></div><el-button :loading="busy" @click="run(load)">刷新</el-button></div>
+    <div class="surface-header"><div><h2>自定义功能插件</h2><p>添加待办、备忘等功能，按需授权工作台能力，添加和停用立即生效。</p></div><el-button :loading="busy" @click="run(load)">刷新</el-button></div>
     <div class="manager-body">
       <el-alert v-for="error in data.errors" :key="error.id" :title="`${error.id}：${error.message}`" type="error" :closable="false" />
       <div class="install-row"><el-input v-model="directory" aria-label="插件目录" placeholder="本机插件目录的绝对路径" :disabled="busy" /><el-button :disabled="!directory.trim() || busy" @click="inspect">检查插件</el-button></div>
-      <p>内附示例：<el-button v-for="example in data.examples" :key="example.directory" link type="primary" @click="directory = example.directory; inspect()">{{ example.name }}</el-button></p>
+      <p class="examples">内附示例：<el-button v-for="example in data.examples" :key="example.directory" link type="primary" @click="directory = example.directory; inspect()">{{ example.name }}</el-button></p>
       <div v-if="inspected" class="package-preview">
         <h3>{{ inspected.manifest.name }} · {{ inspected.manifest.version }}</h3><p>{{ inspected.manifest.description }}</p><p>来源：{{ inspected.source }}</p>
         <p>选择允许使用的宿主能力。未授权的能力会被拒绝；Jira 写入仍需每次预览确认。</p>
         <el-checkbox-group v-model="grants"><el-checkbox v-for="permission in inspected.manifest.permissions" :key="permission" :value="permission">{{ labels[permission] }}</el-checkbox></el-checkbox-group>
         <el-button type="primary" :disabled="busy" @click="install">确认授权并添加</el-button><el-button @click="inspected = undefined">取消</el-button>
       </div>
-      <el-empty v-if="!data.plugins.length" description="尚未添加自定义插件" :image-size="50" />
+      <p v-if="!data.plugins.length" class="empty-plugins">尚未添加自定义插件。填写本机插件目录，或选择上方示例开始。</p>
       <div v-for="plugin in data.plugins" :key="plugin.manifest.id" class="plugin-row">
         <div><strong>{{ plugin.manifest.name }}</strong> <span>{{ plugin.manifest.version }} · {{ plugin.enabled ? '已启用' : '已停用' }}</span><p>{{ plugin.manifest.description }}</p><small>{{ plugin.source }}</small><p v-if="plugin.error">{{ plugin.error }}</p></div>
         <div><el-button :disabled="busy || !plugin.enabled" @click="router.push({ path: '/agent', query: { view: 'plugins', plugin: plugin.manifest.id } })">打开</el-button><el-button :disabled="busy" @click="change(plugin)">{{ plugin.enabled ? '停用' : '启用' }}</el-button><el-button :disabled="busy" @click="grantTarget = plugin; selectedGrants = [...plugin.grants]">权限</el-button><el-button type="danger" plain :disabled="busy" @click="change(plugin, true)">移除</el-button></div>
@@ -43,4 +43,9 @@ onMounted(() => run(load));
 </template>
 <style scoped>
 .manager{margin-bottom:24px}.manager-body{padding:20px;display:grid;gap:16px}.install-row,.plugin-row{display:flex;gap:12px;align-items:center;justify-content:space-between}.plugin-row{padding:16px;border:1px solid var(--ui-border);border-radius:10px;flex-wrap:wrap}.plugin-row p,.manager p{color:var(--ui-muted);line-height:1.6}.plugin-row small{overflow-wrap:anywhere}.package-preview{padding:16px;background:var(--ui-hover);border-radius:10px}.package-preview .el-checkbox-group{margin-bottom:16px}
+.manager-body > p { margin: 0; font-size: 13px; }
+.examples { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.examples :deep(.el-button) { margin: 0; }
+.empty-plugins { padding: 16px; border: 1px dashed var(--ui-border); border-radius: 8px; background: var(--ui-hover); }
+@media (max-width: 600px) { .install-row { flex-wrap: wrap; } .install-row > .el-input { flex-basis: 100%; } }
 </style>

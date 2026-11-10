@@ -34,7 +34,7 @@ onMounted(() => {
   settingsResize.observe(settingsRoot.value);
 });
 onBeforeUnmount(() => settingsResize?.disconnect());
-const settingsTabs = ['connections', 'models', 'automation', 'reports', 'runtime'];
+const settingsTabs = ['connections', 'plugins', 'models', 'automation', 'reports', 'runtime'];
 const activeTab = computed({
   get: () => typeof route.query.settingsTab === 'string' && settingsTabs.includes(route.query.settingsTab) ? route.query.settingsTab : 'connections',
   set: value => { void router.replace({ query: { ...route.query, settingsTab: value } }); },
@@ -184,8 +184,8 @@ async function save() {
   <div ref="settingsRoot" class="delivery-settings">
     <PageHeading title="连接与策略设置" description="按连接、执行、自动交付与汇报分别管理；切换分栏会保留未保存的内容。" :loading="isFetching" @refresh="query.refetch()" />
     <el-tabs v-model="activeTab" :tab-position="settingsTabPosition" class="settings-tabs" aria-label="设置分类">
-      <el-tab-pane label="连接与项目" name="connections" tabindex="0"><CustomPluginManager /><IntegrationPluginsCard />
-          <ShareConnectionCard /></el-tab-pane>
+      <el-tab-pane label="连接与项目" name="connections" tabindex="0"><ShareConnectionCard /></el-tab-pane>
+      <el-tab-pane label="接入插件" name="plugins" tabindex="0"><IntegrationPluginsCard /><CustomPluginManager /></el-tab-pane>
       <el-tab-pane label="模型与执行" name="models" tabindex="0"><AgentModelDefaultsCard /><CliExecutorCard /></el-tab-pane>
       <el-tab-pane label="自动交付" name="automation" tabindex="0"><el-alert v-if="!integrations.capability('issues.read')" title="任务提供者未接入或不可用。原策略保留，相关巡检与派发已暂停；请先在插件管理中恢复连接。" type="info" :closable="false" />
         <QueryState :loading="isPending" :error="error" :has-data="!!data && !!form" @retry="query.refetch()">

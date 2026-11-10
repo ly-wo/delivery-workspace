@@ -40,7 +40,7 @@ onMounted(() => run(load));
 </script>
 <template>
   <div class="plugin-workspace">
-    <div class="toolbar"><el-select :model-value="id" placeholder="选择功能插件" @change="router.push({ query: { view: 'plugins', plugin: $event } })"><el-option v-for="p in plugins" :key="p.manifest.id" :value="p.manifest.id" :label="p.manifest.name + (p.enabled ? '' : '（已停用）')" /></el-select><el-button :loading="busy" @click="run(load)">刷新</el-button><el-button @click="router.push({ query: { view: 'settings' } })">管理插件</el-button></div>
+    <div class="toolbar"><el-select :model-value="id" placeholder="选择功能插件" @change="router.push({ query: { view: 'plugins', plugin: $event } })"><el-option v-for="p in plugins" :key="p.manifest.id" :value="p.manifest.id" :label="p.manifest.name + (p.enabled ? '' : '（已停用）')" /></el-select><el-button :loading="busy" @click="run(load)">刷新</el-button><el-button @click="router.push({ query: { view: 'settings', settingsTab: 'plugins' } })">管理插件</el-button></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-empty v-if="!plugin || !plugin.enabled" :description="id ? '插件已停用或移除，历史引用快照仍保留在会话中' : '请先在设置中添加插件，再选择要打开的功能'" />
     <template v-else>

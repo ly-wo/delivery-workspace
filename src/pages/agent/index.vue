@@ -118,7 +118,7 @@ function openThread(event: MouseEvent) {
           <div id="workspace-panel-toolbar"></div>
         </header>
         <WorkspacePanelViewport :key="view.id" :view-id="view.id">
-          <div v-if="!pluginReady" class="plugin-unavailable"><h2>{{ view.label }}</h2><p>{{ integrations.query.isPending.value ? '正在读取插件状态…' : integrations.query.error.value?.message || '提供此功能的插件未启用、已移除或尚未配置。历史数据仍保留，接入后可继续使用原功能。' }}</p><el-button @click="open('settings')">管理接入插件</el-button></div>
+          <div v-if="!pluginReady" class="plugin-unavailable"><h2>{{ view.label }}</h2><p>{{ integrations.query.isPending.value ? '正在读取插件状态…' : integrations.query.error.value?.message || '提供此功能的插件未启用、已移除或尚未配置。历史数据仍保留，接入后可继续使用原功能。' }}</p><el-button @click="router.push({ path: '/agent', query: { view: 'settings', settingsTab: 'plugins' } })">管理接入插件</el-button></div>
           <AgentAutomationPanel v-else-if="view.id === 'automation'" :scoped-jobs="[]" :daily-report-available="context.dailyReportAvailable" :daily-report-pending="context.dailyReportPending" :daily-report-for-date="context.dailyReportForDate" @generate-daily-report="context.generateDailyReport" @compose="compose" />
           <RequirementDevelopment v-else-if="view.id === 'design'" @open-run="openRun" />
           <component :is="panel" v-else v-bind="'mode' in view ? { mode: view.mode } : {}" @open-run="openRun" />
