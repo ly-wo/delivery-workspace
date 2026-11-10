@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import type { AutomationData, AutomationProjectPreview, AutomationProjectProfile, AutomationSettings, ProjectsData } from '../../../shared/hub';
+import { useIntegrationPlugins } from '../../plugins/runtime';
 import { useSource, useSourceActions } from '../../shared/api';
 import { safeUrl, dateTime, isDone } from '../../shared/format';
 import PageHeading from '../../shared/ui/PageHeading.vue';
@@ -19,6 +20,7 @@ import IntegrationPluginsCard from './IntegrationPluginsCard.vue';
 import CustomPluginManager from '../custom-plugins/CustomPluginManager.vue';
 import WorkspaceReportsCard from './WorkspaceReportsCard.vue';
 
+const integrations = useIntegrationPlugins();
 const route = useRoute(), router = useRouter();
 const settingsRoot = ref<HTMLElement>();
 const settingsTabPosition = shallowRef<'top' | 'left'>('top');
@@ -40,7 +42,6 @@ const activeTab = computed({
 
 const query = useSource<AutomationData>('automation');
 const projects = useSource<ProjectsData>('projects');
-const config = useSource<{ baseUrl: string; hasCredentials: boolean }>('config');
 const { data, error, isPending, isFetching } = query;
 const form = ref<AutomationSettings>();
 const dirty = shallowRef(false);
@@ -186,7 +187,7 @@ async function save() {
       <el-tab-pane label="连接与项目" name="connections" tabindex="0"><CustomPluginManager /><IntegrationPluginsCard />
           <ShareConnectionCard /></el-tab-pane>
       <el-tab-pane label="模型与执行" name="models" tabindex="0"><AgentModelDefaultsCard /><CliExecutorCard /></el-tab-pane>
-      <el-tab-pane label="自动交付" name="automation" tabindex="0">
+      <el-tab-pane label="自动交付" name="automation" tabindex="0"><el-alert v-if="!integrations.capability('issues.read')" title="任务提供者未接入或不可用。原策略保留，相关巡检与派发已暂停；请先在插件管理中恢复连接。" type="info" :closable="false" />
         <QueryState :loading="isPending" :error="error" :has-data="!!data && !!form" @retry="query.refetch()">
           <div v-if="form && data" class="automation-settings">
             <div class="surface">
@@ -197,7 +198,7 @@ async function save() {
                 </div>
                 <StatusPill :value="data.settings.enabled ? 'active' : 'paused'" :label="data.settings.enabled ? '策略已启用' : '策略已暂停'" />
               </div>
-              <el-form class="surface-body settings-form" :disabled="saving" label-position="top" @change="dirty = true">
+              <el-form class="surface-body settings-form" :disabled="saving || !integrations.capability('issues.read')" label-position="top" @change="dirty = true">
                 <div class="settings-switch">
                   <div>
                     <strong>启用自动巡检</strong>
@@ -307,22 +308,6 @@ async function save() {
               <div class="surface-header"><h2>当前运行环境状态</h2></div>
               <div class="surface-body">
                 <dl class="settings-facts">
-                  <dt>Jira 服务</dt>
-                  <dd>
-                    <a :href="safeUrl(config.data.value?.baseUrl)" target="_blank">{{ config.data.value?.baseUrl || '未读取' }}</a>
-                  </dd>
-                  <dt>来源凭据状态</dt>
-                  <dd>
-                    {{
-                      config.error.value
-                        ? '读取失败'
-                        : config.data.value
-                          ? config.data.value.hasCredentials
-                            ? '已配置（密钥安全存储在本机）'
-                            : '未配置'
-                          : '正在读取'
-                    }}
-                  </dd>
                   <dt>下次自动巡检</dt>
                   <dd>{{ dateTime(data.nextRun) }}</dd>
                   <dt>验证浏览器</dt>

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { JiraIssueRequest } from '../jira-issue.js';
-import { assertPluginEnabled } from './definitions.mjs';
+import { assertIntegrationCapability } from './definitions.mjs';
 import { fingerprint, privateJson, readJson, type CustomPluginRuntime } from './custom-runtime.js';
 const keySchema = z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/);
 const projectSchema = z.string().regex(/^[A-Z][A-Z0-9_]*$/);
@@ -36,7 +36,7 @@ export async function createPluginJira(directory: string, runtime: CustomPluginR
   };
   const identity = () => options.identity?.() || fingerprint([site(), process.env.JIRA_USERNAME, process.env.JIRA_AUTH_HEADER, process.env.JIRA_API_TOKEN, process.env.JIRA_COOKIE, process.env.JIRA_KEYCHAIN_SERVICE]);
   async function json(pluginId: string, resource: string, method = 'GET', body?: unknown): Promise<Raw> {
-    runtime.assertCapability(pluginId, method === 'GET' ? 'jira.read' : 'jira.create'); assertPluginEnabled('jira');
+    runtime.assertCapability(pluginId, method === 'GET' ? 'jira.read' : 'jira.create'); assertIntegrationCapability(method === 'GET' ? 'issues.read' : 'issues.write');
     const response = await request(resource, method, body);
     if (!response.ok) throw Object.assign(new Error(`Jira 请求失败：HTTP ${response.status}`), { statusCode: response.status, definite: response.status >= 400 && response.status < 500 });
     return response.json();

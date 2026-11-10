@@ -4,18 +4,21 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, re
 import { useRoute, useRouter } from 'vue-router';
 import AgentWorkspace from '../../features/agent-workbench/AgentWorkspace.vue';
 import AgentAutomationPanel from '../../features/agent-workbench/AgentAutomationPanel.vue';
-import { workspaceSections, workspaceView } from './workspace-navigation';
+import { registeredWorkspaceSections, workspaceView } from './workspace-navigation';
 import { agentWorkspaceContext } from '../../shared/agent-workspace-context';
 import RequirementDevelopment from '../../features/requirement-development/RequirementDevelopment.vue';
-import JiraFix from '../../features/jira-fix/JiraFix.vue';
+import { useIntegrationPlugins, integrationComponents } from '../../plugins/runtime';
 import WorkspacePanelViewport from '../../shared/ui/WorkspacePanelViewport.vue';
 import { Braces, CircleCheck, FolderGit2, LayoutGrid, MessagesSquare, Settings2, Sun, Terminal } from '@lucide/vue';
 import ThemePicker from '../../shared/theme/ThemePicker.vue';
 
 const route = useRoute(), router = useRouter();
+const integrations = useIntegrationPlugins();
+const workspaceSections = computed(() => registeredWorkspaceSections(integrations.active.value.map(plugin => plugin.id)));
+const pluginReady = computed(() => !view.value?.pluginId || integrations.available(view.value.pluginId));
 const localPort = window.location.port || '5288';
-const navigationIcons = { today: Sun, tasks: CircleCheck, projects: FolderGit2, execution: Terminal, integration: Braces, automation: Settings2 };
-const navigationLabels = { today: '今日', tasks: 'Jira', projects: '项目', execution: 'AI 交付', integration: '联调', automation: '设置' };
+const navigationIcons: Record<string, any> = { today: Sun, tasks: CircleCheck, projects: FolderGit2, execution: Terminal, integration: Braces, automation: Settings2 };
+const navigationLabels: Record<string, string> = { today: '今日', projects: '项目', execution: 'AI 交付', integration: '联调', automation: '设置' };
 const workspace = ref<InstanceType<typeof AgentWorkspace>>();
 const panelStates = new Map<string, unknown>();
 const panelLocations = new Map<string, typeof route.query>();
@@ -30,7 +33,7 @@ provide(agentWorkspaceContext, {
 });
 const view = computed(() => workspaceView(route.query.view));
 watch(view, current => { document.title = `${current?.label || 'Agent Studio'} · Delivery Workspace`; }, { immediate: true });
-const section = computed(() => workspaceSections.find(group => group.items.some(item => item.id === view.value?.id)));
+const section = computed(() => workspaceSections.value.find(group => group.items.some(item => item.id === view.value?.id)));
 const panels = {
   plugins: defineAsyncComponent(() => import('../../features/custom-plugins/CustomPluginWorkspace.vue')),
   interfaces: defineAsyncComponent(() => import('../../features/interface-center/InterfaceCenter.vue')),
@@ -38,7 +41,6 @@ const panels = {
   'integration-execution': defineAsyncComponent(() => import('../../features/refactor-control/RefactorControl.vue')),
   today: defineAsyncComponent(() => import('../../features/workbench/Workbench.vue')),
   overview: defineAsyncComponent(() => import('../../features/workspace-overview/WorkspaceOverview.vue')),
-  tasks: defineAsyncComponent(() => import('../../features/task-calendar/TaskWorkspace.vue')),
   deployments: defineAsyncComponent(() => import('../../features/deployments/DeploymentWorkspace.vue')),
   ports: defineAsyncComponent(() => import('../../features/port-monitor/PortMonitor.vue')),
   projects: defineAsyncComponent(() => import('../../features/project-inventory/ProjectInventory.vue')),
@@ -50,7 +52,7 @@ const panels = {
 const panel = computed(() => {
   const id = view.value?.id;
   if (!id) return undefined;
-  if (['tasks', 'calendar', 'stats'].includes(id)) return panels.tasks;
+  if (view.value?.pluginId) return pluginReady.value ? integrationComponents[view.value.pluginId]?.components[view.value.component || ''] : undefined;
   if (['plan', 'queue', 'runs'].includes(id)) return panels.execution;
   return panels[id as keyof typeof panels];
 });
@@ -58,7 +60,7 @@ watch(() => route.query, query => {
   const current = workspaceView(query.view);
   if (!current) return;
   panelLocations.set(current.id, { ...query });
-  const group = workspaceSections.find(item => item.items.some(view => view.id === current.id));
+  const group = workspaceSections.value.find(item => item.items.some(view => view.id === current.id));
   if (group) lastSectionViews.set(group.id, current.id);
 }, { immediate: true });
 function open(id?: string) { void router.push({ path: '/agent', query: id ? panelLocations.get(id) || { view: id } : {} }); }
@@ -93,7 +95,7 @@ function openThread(event: MouseEvent) {
       </button>
       <nav class="workspace-primary-nav" aria-label="主导航">
         <button type="button" :aria-current="!view ? 'page' : undefined" aria-label="会话" title="会话" @click="open()"><MessagesSquare :size="16" /><span>会话</span></button>
-        <button v-for="group in workspaceSections" :key="group.id" type="button" :aria-label="group.label" :aria-current="section?.id === group.id ? 'page' : undefined" :title="group.label" @click="open(lastSectionViews.get(group.id) || group.items[0].id)"><component :is="navigationIcons[group.id]" :size="16" /><span>{{ navigationLabels[group.id] }}</span></button>
+        <button v-for="group in workspaceSections" :key="group.id" type="button" :aria-label="group.label" :aria-current="section?.id === group.id ? 'page' : undefined" :title="group.label" @click="open(group.items.find(item => item.id === lastSectionViews.get(group.id))?.id || group.items[0].id)"><component :is="navigationIcons[group.icon || group.id] || LayoutGrid" :size="16" /><span>{{ group.shortLabel || navigationLabels[group.id] || group.label }}</span></button>
       </nav>
       <div class="workspace-topbar-tools"><span class="workspace-local">本地 <b>{{ localPort }}</b></span><ThemePicker /></div>
     </header>
@@ -101,7 +103,7 @@ function openThread(event: MouseEvent) {
     <template #navigation="context">
       <nav v-if="context.placement !== 'footer'" class="workspace-navigation" aria-label="统一工作入口">
         <button type="button" :class="{ active: !view }" :aria-current="!view ? 'page' : undefined" title="会话" @click="open(); context.closeNavigation()"><MessagesSquare :size="17" /><span>会话</span></button>
-        <button v-for="group in workspaceSections" :key="group.id" type="button" :class="{ active: section?.id === group.id }" :aria-label="group.label" :aria-current="section?.id === group.id ? 'page' : undefined" :title="group.label" @click="open(lastSectionViews.get(group.id) || group.items[0].id); context.closeNavigation()"><component :is="navigationIcons[group.id]" :size="17" /><span>{{ group.id === 'today' ? '今日' : group.id === 'automation' ? '设置' : group.label }}</span></button>
+        <button v-for="group in workspaceSections" :key="group.id" type="button" :class="{ active: section?.id === group.id }" :aria-label="group.label" :aria-current="section?.id === group.id ? 'page' : undefined" :title="group.label" @click="open(group.items.find(item => item.id === lastSectionViews.get(group.id))?.id || group.items[0].id); context.closeNavigation()"><component :is="navigationIcons[group.icon || group.id] || LayoutGrid" :size="17" /><span>{{ group.id === 'today' ? '今日' : group.id === 'automation' ? '设置' : group.label }}</span></button>
       </nav>
     </template>
     <template #workbench="context">
@@ -116,9 +118,9 @@ function openThread(event: MouseEvent) {
           <div id="workspace-panel-toolbar"></div>
         </header>
         <WorkspacePanelViewport :key="view.id" :view-id="view.id">
-          <AgentAutomationPanel v-if="view.id === 'automation'" :scoped-jobs="[]" :daily-report-available="context.dailyReportAvailable" :daily-report-pending="context.dailyReportPending" :daily-report-for-date="context.dailyReportForDate" @generate-daily-report="context.generateDailyReport" @compose="compose" />
+          <div v-if="!pluginReady" class="plugin-unavailable"><h2>{{ view.label }}</h2><p>{{ integrations.query.isPending.value ? '正在读取插件状态…' : integrations.query.error.value?.message || '提供此功能的插件未启用、已移除或尚未配置。历史数据仍保留，接入后可继续使用原功能。' }}</p><el-button @click="open('settings')">管理接入插件</el-button></div>
+          <AgentAutomationPanel v-else-if="view.id === 'automation'" :scoped-jobs="[]" :daily-report-available="context.dailyReportAvailable" :daily-report-pending="context.dailyReportPending" :daily-report-for-date="context.dailyReportForDate" @generate-daily-report="context.generateDailyReport" @compose="compose" />
           <RequirementDevelopment v-else-if="view.id === 'design'" @open-run="openRun" />
-          <JiraFix v-else-if="view.id === 'jira-fix'" @open-run="openRun" />
           <component :is="panel" v-else v-bind="'mode' in view ? { mode: view.mode } : {}" @open-run="openRun" />
         </WorkspacePanelViewport>
       </section>
@@ -132,7 +134,7 @@ function openThread(event: MouseEvent) {
 .workspace-navigation button{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:0;border-radius:8px;background:transparent;color:var(--ui-secondary);font:inherit;font-size:13px;cursor:pointer}
 .workspace-navigation button:hover{background:var(--ui-hover)}
 .workspace-navigation button.active{background:var(--ui-accent-soft);color:var(--ui-accent);font-weight:600}
-.workspace-panel{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--ui-bg);color:var(--ui-text)}
+.plugin-unavailable{padding:24px}.workspace-panel{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--ui-bg);color:var(--ui-text)}
 </style>
 
 <style src="./workspace-pages.css"></style>

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pluginDefinitions, definition } from './definitions.mjs';
 
+const connection = config => JSON.stringify(config ? Object.fromEntries(Object.entries(config).filter(([key]) => !['enabled', 'installed'].includes(key))) : {});
 const authKeys = ['AUTH_HEADER', 'COOKIE', 'KEYCHAIN_SERVICE', 'KEYCHAIN_ACCOUNT', 'USERNAME', 'API_TOKEN'];
 export const pluginFile = (env = process.env) => path.resolve(env.DELIVERY_DATA_DIR || '.data', 'credentials', 'plugins.json');
 export async function readPluginFile(file) {
@@ -25,11 +26,12 @@ function site(value) {
 function validate(id, input) {
   definition(id);
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('插件配置格式无效');
-  const fields = id === 'wecom' ? ['enabled', 'groupName', 'webhook'] : ['enabled', 'baseUrl', 'username', 'token'];
+  const fields = id === 'wecom' ? ['enabled', 'installed', 'groupName', 'webhook'] : ['enabled', 'installed', 'baseUrl', 'username', 'token'];
   if (Object.keys(input).some(key => !fields.includes(key))) throw new Error('插件配置包含不支持的字段');
   if (typeof input.enabled !== 'boolean') throw new Error('请选择插件启用状态');
+  if (input.installed !== undefined && typeof input.installed !== 'boolean') throw new Error('插件安装状态无效');
   const output = { ...input };
-  for (const key of fields.filter(key => key !== 'enabled')) {
+  for (const key of fields.filter(key => !['enabled', 'installed'].includes(key))) {
     if (input[key] === undefined) continue;
     if (typeof input[key] !== 'string' || input[key].length > 4096 || /[\x00-\x1f\x7f]/.test(input[key])) throw new Error('插件字段格式无效');
     output[key] = input[key].trim();
@@ -48,6 +50,7 @@ export function applyPluginEnvironment(data, env) {
     const config = data.plugins[plugin.id];
     if (!config) continue;
     env[`DELIVERY_PLUGIN_${plugin.prefix}_ENABLED`] = String(config.enabled);
+    env[`DELIVERY_PLUGIN_${plugin.prefix}_INSTALLED`] = String(config.installed !== false);
     if (plugin.id === 'wecom') {
       if (config.webhook) { env.DELIVERY_PLUGIN_WECOM_WEBHOOK = config.webhook; env.DELIVERY_PLUGIN_WECOM_GROUP = config.groupName || ''; }
     } else if (config.baseUrl) {
@@ -70,22 +73,47 @@ export async function createPluginStore({ file = pluginFile(), env = process.env
       const saved = data.plugins[plugin.id];
       const enabled = saved?.enabled ?? env[`DELIVERY_PLUGIN_${plugin.prefix}_ENABLED`] !== 'false';
       const legacy = plugin.id === 'wecom' ? wecomConfig() : {};
-      return { ...plugin, enabled, baseUrl: saved?.baseUrl ?? env[`${plugin.prefix}_BASE_URL`] ?? '',
+      const runningConfigured = plugin.id === 'wecom' ? Boolean(env.DELIVERY_PLUGIN_WECOM_WEBHOOK || legacy.hasWebhook) : Boolean(env[`${plugin.prefix}_BASE_URL`] && (env[`${plugin.prefix}_AUTH_HEADER`] || env[`${plugin.prefix}_COOKIE`] || env[`${plugin.prefix}_KEYCHAIN_SERVICE`] || env[`${plugin.prefix}_USERNAME`] && env[`${plugin.prefix}_API_TOKEN`]));
+      return { ...plugin, enabled, installed: saved?.installed !== false, runningEnabled: env[`DELIVERY_PLUGIN_${plugin.prefix}_ENABLED`] !== 'false' && env[`DELIVERY_PLUGIN_${plugin.prefix}_INSTALLED`] !== 'false', runningConfigured, baseUrl: saved?.baseUrl ?? env[`${plugin.prefix}_BASE_URL`] ?? '',
         username: saved?.username ?? env[`${plugin.prefix}_USERNAME`] ?? '', groupName: saved?.groupName ?? legacy.groupName ?? '',
         configured: saved?.baseUrl ? Boolean(saved.token) : plugin.id === 'wecom' ? Boolean(saved?.webhook || legacy.hasWebhook) : Boolean(env[`${plugin.prefix}_AUTH_HEADER`] || env[`${plugin.prefix}_COOKIE`] || env[`${plugin.prefix}_KEYCHAIN_SERVICE`] || env[`${plugin.prefix}_USERNAME`] && env[`${plugin.prefix}_API_TOKEN`]),
-        restartRequired: JSON.stringify(saved) !== JSON.stringify(startup.plugins[plugin.id]),
+        restartRequired: connection(saved) !== connection(startup.plugins[plugin.id]),
         source: saved ? 'plugin' : 'legacy' };
     });
   }
   async function candidate(id, input) {
     const next = validate(id, input), current = (await readPluginFile(file)).plugins[id];
+    // Saving an unchanged legacy connection must not replace its credential source with an empty token.
+    const prefix = definition(id).prefix;
+    if (id !== 'wecom' && !current?.baseUrl && !next.token && next.baseUrl
+      && next.baseUrl === (env[`${prefix}_BASE_URL`] || '').replace(/\/+$/, '') && (next.username || '') === (env[`${prefix}_USERNAME`] || '')) {
+      return { enabled: next.enabled, ...(current?.installed !== undefined ? {installed: current.installed} : {}), ...(next.installed !== undefined ? {installed: next.installed} : {}) };
+    }
     const secret = id === 'wecom' ? 'webhook' : 'token';
+    if (next.installed === undefined && current?.installed !== undefined) next.installed = current.installed;
     const sameIdentity = id === 'wecom' || next.baseUrl === current?.baseUrl && (next.username || '') === (current?.username || '');
     if (!next[secret] && sameIdentity && current?.[secret]) next[secret] = current[secret];
     return next;
   }
   return {
     list,
+    state(id, input) {
+      const plugin = definition(id);
+      if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['enabled', 'installed'].includes(key)) || !Object.keys(input).length || Object.values(input).some(value => typeof value !== 'boolean')) throw new Error('插件状态无效');
+      const result = queue.then(async () => {
+        const data = await readPluginFile(file);
+        const next = { enabled: env[`DELIVERY_PLUGIN_${plugin.prefix}_ENABLED`] !== 'false', ...data.plugins[id], ...input };
+        data.plugins[id] = next;
+        await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+        const temp = `${file}.${randomUUID()}.tmp`;
+        try { await fs.writeFile(temp, JSON.stringify(data, null, 2) + '\n', {mode: 0o600, flag: 'wx'}); await fs.rename(temp, file); }
+        finally { await fs.rm(temp, {force: true}); }
+        env[`DELIVERY_PLUGIN_${plugin.prefix}_ENABLED`] = String(next.enabled);
+        env[`DELIVERY_PLUGIN_${plugin.prefix}_INSTALLED`] = String(next.installed !== false);
+        return { plugins: await list(), message: '插件状态已生效；配置、数据与历史记录已保留' };
+      });
+      queue = result.catch(() => {}); return result;
+    },
     save(id, input) {
       const result = queue.then(async () => {
         const next = await candidate(id, input), data = await readPluginFile(file);
@@ -94,7 +122,9 @@ export async function createPluginStore({ file = pluginFile(), env = process.env
         const temp = `${file}.${randomUUID()}.tmp`;
         try { await fs.writeFile(temp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600, flag: 'wx' }); await fs.rename(temp, file); }
         finally { await fs.rm(temp, { force: true }); }
-        return { plugins: await list(), message: '插件配置已保存；请在任务结束后重启工作台使配置生效' };
+        env[`DELIVERY_PLUGIN_${definition(id).prefix}_ENABLED`] = String(next.enabled);
+        env[`DELIVERY_PLUGIN_${definition(id).prefix}_INSTALLED`] = String(next.installed !== false);
+        return { plugins: await list(), message: '启停状态已生效；连接变更请在任务结束后重启工作台生效' };
       });
       queue = result.catch(() => {}); return result;
     },

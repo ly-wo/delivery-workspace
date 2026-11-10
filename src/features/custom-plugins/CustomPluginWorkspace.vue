@@ -2,10 +2,12 @@
 import { computed, inject, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useIntegrationPlugins } from '../../plugins/runtime';
 import { pluginRequest } from './api';
 import { agentWorkspaceContext } from '../../shared/agent-workspace-context';
 import type { CustomPluginInfo, PluginRecord } from '../../../shared/custom-plugins';
 import PluginJiraDialog from './PluginJiraDialog.vue';
+const integrations = useIntegrationPlugins();
 const route = useRoute(), router = useRouter(), workspace = inject(agentWorkspaceContext, undefined);
 const plugins = ref<CustomPluginInfo[]>([]), items = ref<(PluginRecord & { version: string })[]>([]), busy = ref(false), error = ref(''), query = ref(''), status = ref('');
 const id = computed(() => typeof route.query.plugin === 'string' ? route.query.plugin : ''), plugin = computed(() => plugins.value.find(p => p.manifest.id === id.value));
@@ -31,7 +33,7 @@ async function command(action: string) {
   if (action === 'conversation.context') { await run(async () => { const result = await pluginRequest(`${id.value}/context`, { recordId: selected.value!.id }); workspace?.compose(result.prompt); }); }
   else { jiraMode.value = action as typeof jiraMode.value; jiraOpen.value = true; }
 }
-function allowed(action: string) { return !!plugin.value?.grants.includes(action === 'jira.link' ? 'jira.read' : action as any); }
+function allowed(action: string) { if (action.startsWith('jira.') && !integrations.capability(action === 'jira.create' ? 'issues.write' : 'issues.read')) return false; return !!plugin.value?.grants.includes(action === 'jira.link' ? 'jira.read' : action as any); }
 async function updated() { if (selected.value) await run(async () => { detail.value = await pluginRequest(`${id.value}/record?id=${selected.value!.id}`); }); }
 watch(id, () => { query.value = ''; status.value = ''; void run(load); });
 onMounted(() => run(load));
@@ -52,7 +54,7 @@ onMounted(() => run(load));
             <el-date-picker v-else-if="field.type === 'date'" v-model="form[field.key]" type="date" value-format="YYYY-MM-DD" @clear="form[field.key] = ''" />
             <el-input v-else v-model="form[field.key]" :type="field.type === 'textarea' ? 'textarea' : 'text'" :rows="5" :maxlength="field.maxLength" />
           </el-form-item><el-button type="primary" @click="save">保存事项</el-button><el-button v-if="selected" type="danger" plain @click="remove">删除事项</el-button></el-form>
-          <template v-if="selected"><h3>关联操作</h3><p>操作使用已保存的事项内容；编辑后请先保存。</p><div class="toolbar"><el-button v-for="c in plugin.manifest.commands" :key="c.id" :disabled="busy || !allowed(c.action) || (c.action === 'conversation.context' && !workspace)" @click="command(c.action)">{{ c.label }}</el-button></div>
+          <template v-if="selected"><h3>关联操作</h3><p v-if="plugin.manifest.commands.some(c => c.action.startsWith('jira.')) && !integrations.capability('issues.read')">任务提供者未接入或不可用，请在插件管理中启用并配置。</p><p>操作使用已保存的事项内容；编辑后请先保存。</p><div class="toolbar"><el-button v-for="c in plugin.manifest.commands" :key="c.id" :disabled="busy || !allowed(c.action) || (c.action === 'conversation.context' && !workspace)" @click="command(c.action)">{{ c.label }}</el-button></div>
             <h4>关联的 Jira 任务</h4><p v-if="!detail?.links?.length">暂无关联</p><p v-for="link in detail?.links" :key="link.url"><a :href="link.url" target="_blank" rel="noopener">{{ link.key }} · {{ link.summary }}</a></p>
             <el-alert v-for="operation in detail?.operations?.filter((o: any) => ['unknown', 'sending'].includes(o.status))" :key="operation.id" :title="operation.message || 'Jira 创建正在处理，请勿重复提交'" type="warning" :closable="false" />
             <h4>会话引用来源</h4><p v-if="!detail?.citations?.length">暂无已保存的会话引用</p><p v-for="citation in detail?.citations" :key="citation.runId"><a :href="citation.url">{{ citation.title }}</a> · {{ citation.createdAt }}</p>

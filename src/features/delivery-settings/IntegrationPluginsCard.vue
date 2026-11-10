@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { useQueryClient } from '@tanstack/vue-query';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 interface Plugin {
   id: string; name: string; description: string; enabled: boolean; baseUrl: string; username: string;
-  groupName: string; configured: boolean; restartRequired: boolean; source: string; token?: string; webhook?: string;
+  installed: boolean; runningEnabled: boolean; views: {id: string; label: string}[]; groupName: string; configured: boolean; restartRequired: boolean; source: string; token?: string; webhook?: string;
 }
+const client = useQueryClient(), router = useRouter();
 const plugins = ref<Plugin[]>([]), busy = ref(false), error = ref('');
 async function load() {
   busy.value = true;
@@ -29,27 +32,39 @@ async function act(plugin: Plugin, action: 'configure' | 'test') {
       const saved = result.plugins.find((item: Plugin) => item.id === plugin.id);
       Object.assign(plugin, saved, { token: '', webhook: '' });
     }
+    await client.invalidateQueries({queryKey: ['integration-plugins']});
     ElMessage.success(result.message);
   } catch (e) { ElMessage.error(e instanceof Error ? e.message : '插件操作失败'); }
   finally { busy.value = false; }
+}
+async function change(plugin: Plugin, input: {enabled?: boolean; installed?: boolean}) {
+ busy.value = true;
+ try {
+  const response = await fetch(`/api/plugins/${plugin.id}/state`, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Delivery-Confirmed': 'yes'}, body: JSON.stringify(input)});
+  const result = await response.json(); if (!response.ok) throw new Error(result.message);
+  plugins.value = result.plugins; await client.invalidateQueries({queryKey: ['integration-plugins']}); ElMessage.success(result.message);
+ } catch(e) { ElMessage.error(e instanceof Error ? e.message : '插件状态修改失败'); } finally {busy.value = false;}
 }
 onMounted(load);
 </script>
 <template>
   <section class="surface integration-plugins">
-    <div class="surface-header"><div><h2>接入插件</h2><p>配置仅保存在本机。保存后，等待任务结束并重启工作台使配置生效。</p></div></div>
+    <div class="surface-header"><div><h2>接入插件</h2><p>通过插件接入业务功能。启停与移除立即生效；连接配置变更需在任务结束后重启。</p></div></div>
     <div v-if="error" role="alert">{{ error }} <el-button @click="load">重试</el-button></div>
     <div class="plugin-grid">
       <el-form v-for="plugin in plugins" :key="plugin.id" label-position="top" :disabled="busy" class="plugin-card">
         <h3>{{ plugin.name }}</h3><p>{{ plugin.description }}</p>
         <p>{{ plugin.configured ? '已配置凭据（尚需验证权限）' : '待配置凭据' }} · {{ plugin.source === 'legacy' ? '沿用本机原配置' : '插件管理' }}</p>
         <el-alert v-if="plugin.restartRequired" title="配置待重启生效" type="warning" :closable="false" />
-        <el-form-item label="启用插件"><el-switch v-model="plugin.enabled" :aria-label="`启用 ${plugin.name}`" /></el-form-item>
+        <div class="plugin-actions"><el-button v-if="!plugin.installed" @click="change(plugin, {installed: true, enabled: true})">恢复接入</el-button><template v-else><el-button @click="change(plugin, {enabled: !plugin.runningEnabled})">{{ plugin.runningEnabled ? '停用' : '启用' }}</el-button><el-button @click="change(plugin, {installed: false})">移除接入（保留数据）</el-button></template></div>
+        <p v-if="!plugin.installed">已移除接入，配置和历史数据保留。</p>
+        <p v-else-if="!plugin.runningEnabled">已停用，相关入口与新调用已停止。</p>
+        <div v-if="plugin.installed && plugin.runningEnabled && plugin.configured" class="plugin-actions"><el-button v-for="view in plugin.views" :key="view.id" @click="router.push({path:'/agent', query:{view:view.id}})">{{ view.label }}</el-button></div>
         <template v-if="plugin.id !== 'wecom'">
           <el-form-item label="服务地址"><el-input v-model="plugin.baseUrl" placeholder="https://your-site.example.com" /></el-form-item>
           <el-form-item label="用户名 / 邮箱（Bearer Token 留空）"><el-input v-model="plugin.username" autocomplete="off" /></el-form-item>
           <el-form-item label="Token（同一站点、账号留空保留插件已存密钥）"><el-input v-model="plugin.token" type="password" show-password autocomplete="new-password" /></el-form-item>
-          <p v-if="plugin.source === 'legacy'">首次改为插件管理时需重新填写 Token；未保存前继续沿用原连接。</p>
+          <p v-if="plugin.source === 'legacy'">当前沿用本机原连接；启停或恢复无需重填凭据。仅更换连接时填写新的 Token。</p>
         </template>
         <template v-else>
           <el-form-item label="群名称"><el-input v-model="plugin.groupName" /></el-form-item>

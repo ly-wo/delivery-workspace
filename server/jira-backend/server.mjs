@@ -1,4 +1,4 @@
-import { assertPluginEnabled } from '../plugins/definitions.mjs';
+import { assertPluginEnabled, assertIntegrationRequest } from '../plugins/definitions.mjs';
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -3525,6 +3525,7 @@ export async function handleJiraTaskCalendarRequest(request, response) {
   const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
 
   try {
+    assertIntegrationRequest(url.pathname, process.env, request.method);
     if (url.pathname === "/api/health") {
       if (request.method !== "GET") {
         response.setHeader("Allow", "GET");
@@ -4380,6 +4381,7 @@ let schedulerInterval = null;
 
 function runSchedulerTick() {
   if (automationRestartHeld) return Promise.resolve();
+  try { assertPluginEnabled('jira'); } catch { return Promise.resolve(); }
   if (!schedulerTickPromise) schedulerTickPromise = automationSchedulerTick().finally(() => { schedulerTickPromise = null; });
   return schedulerTickPromise;
 }
