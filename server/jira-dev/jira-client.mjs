@@ -1,3 +1,4 @@
+import { assertPluginEnabled } from '../plugins/definitions.mjs';
 /**
  * 工作入口共用成员本人的 Jira 连接；承接只读查询及已确认的任务、排期、评论和状态写入。
  * 固定 REST 站点并禁止重定向，凭据仅留在内存；写入只发一次，成功必须通过 GET 回读证明。
@@ -106,6 +107,10 @@ function selectProfile(previous, incoming) {
 }
 
 export async function loadJiraConfiguration(environment) {
+  assertPluginEnabled('jira');
+  assertPluginEnabled('jira', environment);
+  if (process.env.DELIVERY_PLUGIN_JIRA_MANAGED === 'true') return { ...process.env };
+  if (environment.DELIVERY_PLUGIN_JIRA_MANAGED === 'true') return { ...environment };
   async function readProfile(filename, required = false) {
     try { return parseEnv(await readFile(filename, 'utf8')); }
     catch (error) {
@@ -133,6 +138,8 @@ export async function loadJiraConfiguration(environment) {
 }
 
 async function authentication(env) {
+  assertPluginEnabled('jira');
+  assertPluginEnabled('jira', env);
   let headers;
   if (env.JIRA_AUTH_HEADER) headers = { Authorization: env.JIRA_AUTH_HEADER };
   if (!headers && env.JIRA_KEYCHAIN_SERVICE && process.platform === 'darwin') {

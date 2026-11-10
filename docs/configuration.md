@@ -19,6 +19,18 @@
 
 `/api/health` 和页面版本提示提供前端构建信息与后端源码摘要。更新代码后重新执行 `pnpm run setup`，在已有任务结束后重启自己启动的工作台，再核对前后端版本。
 
+## 接入插件
+
+在「设置 → 连接」的「接入插件」统一管理 Jira、Confluence 和企微通知 Webhook。每个插件提供启用开关和配置表单；Jira/Confluence 可执行只读用户查询，企微只检查地址格式，实际发送仍使用消息页的预览与确认。
+
+配置保存在 `${DELIVERY_DATA_DIR:-.data}/credentials/plugins.json`，文件权限为 `0600`，不会回传 Token 或 Webhook。保存后，等待当前任务结束，再重启本次工作台进程；页面提示“配置待重启生效”时，旧连接仍在使用。不要将该文件加入源码分享包。
+
+未保存的插件继续沿用原有环境变量和机器人配置。首次切换 Jira/Confluence 到插件管理需填写自己的 Token；有用户名时使用 Basic，无用户名时使用 Bearer。相同站点与账号下 Token 留空保留插件已存密钥；切换站点或账号会清除旧密钥，避免串用认证。站点允许 `/wiki` 等路径前缀。配置存在不代表权限已验证。
+
+插件配置优先于原环境变量、Jira 连接文件和钥匙串；旧文件不被改写。企微插件管理默认通知机器人，专用报告机器人保留其独立配置，但两者发送均受企微插件启停控制。停用在重启后阻止工作台内对应远端调用，不撤销已发送的消息或远端变更，也不管理外部 Agent 自己的 MCP 配置。
+
+新增内置接入时，在 `server/plugins/definitions.mjs` 注册能力和探测入口，扩展存储校验及环境适配，并在真实调用边界执行启停检查。当前仅支持源码内注册的三个插件，不加载任意第三方代码。统一 API 为 `GET /api/plugins`、`POST /api/plugins/:id/configure` 和 `POST /api/plugins/:id/test`；写操作只接受本机同源请求。
+
 ## Jira 和 Confluence
 
 设置 `JIRA_BASE_URL`，再任选自己已有的鉴权方式：`JIRA_USERNAME` + `JIRA_API_TOKEN`、`JIRA_AUTH_HEADER` 或 `JIRA_COOKIE`。macOS 可指向已有钥匙串条目；不要把密码写入源码。

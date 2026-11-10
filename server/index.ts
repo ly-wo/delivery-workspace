@@ -1,3 +1,4 @@
+import { createPluginStore } from './plugins/store.mjs';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createJiraIssueService, createJiraIssueRoute } from './jira-issue.js';
@@ -241,6 +242,7 @@ const integrationCatalog = await loadIntegrationCatalog();
 const integration = await createIntegrationStore(dataDirectory, integrationCatalog);
 const apexBffReview = await createApexBffReviewStore(dataDirectory, integrationCatalog);
 const wecomIntegration = await createWecomIntegration(dataDirectory, { catalog: integrationCatalog });
+const integrationPlugins = await createPluginStore({ wecomConfig: () => wecomIntegration.config() });
 const workspaceTodos = await createWorkspaceTodos(path.join(dataDirectory, 'workspace-todos'));
 const overseasRequirements = await createOverseasRequirements(path.join(dataDirectory, 'overseas-requirements'),
   id => requirementDevelopment.list().some(record => record.id === id));
@@ -504,6 +506,18 @@ const server = http.createServer(async (request, response) => {
       if (url.pathname === '/api/workspace/cursor') { await workspaceCursor(request, response, port); return; }
       if (await projectWorkspaceRoutes(request, response, url)) return;
       if (await projectLaunchRoutes(request, response, url)) return;
+      if (url.pathname === '/api/plugins' || /^\/api\/plugins\/[^/]+\/(?:configure|test)$/.test(url.pathname)) {
+        if (![`localhost:${port}`, `127.0.0.1:${port}`].includes(request.headers.host || '')) { json(response, 403, { message: '仅接受本机看板请求' }); return; }
+        if (request.method === 'GET' && url.pathname === '/api/plugins') { json(response, 200, { plugins: await integrationPlugins.list() }); return; }
+        if (request.method !== 'POST' || url.pathname === '/api/plugins') { json(response, 405, { message: '请求方法不支持' }); return; }
+        if (![`http://localhost:${port}`, `http://127.0.0.1:${port}`].includes(request.headers.origin || '')) { json(response, 403, { message: '请求来源不匹配' }); return; }
+        const [, , , id, action] = url.pathname.split('/');
+        try {
+          const input = await body(request, 30_000);
+          json(response, 200, action === 'test' ? await integrationPlugins.test(id, input) : await integrationPlugins.save(id, input));
+        } catch (error) { json(response, 400, { message: error instanceof Error ? error.message : '插件配置操作失败' }); }
+        return;
+      }
       if (url.pathname === '/api/share/config') {
         if (![`localhost:${port}`, `127.0.0.1:${port}`].includes(request.headers.host || '')) { json(response, 403, { message: '仅接受本机看板请求' }); return; }
         if (request.method === 'GET') { json(response, 200, readShareConfig()); return; }

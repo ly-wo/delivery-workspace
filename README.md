@@ -64,7 +64,7 @@ curl -fsS http://127.0.0.1:5199/api/health
 | `/projects` | 本机项目和 Git 状态 |
 | `/delivery/plan`、`/delivery/queue`、`/delivery/runs` | 执行计划、CLI 队列与运行记录 |
 | `/catchup/execution`、`/catchup/merge`、`/catchup/codex` | 需求追平、合入审核与任务聚合 |
-| `/settings` | 自动化设置与执行环境 |
+| `/settings` | 接入插件（Jira、Confluence、企微 Webhook）、自动化设置与执行环境 |
 | `/messages` | 企业微信消息编辑、预览、草稿、模板与本机历史 |
 | `/lab` | Mastra 暂停、审核、恢复与冲突演示 |
 

@@ -1,3 +1,4 @@
+import { assertPluginEnabled } from '../plugins/definitions.mjs';
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -216,6 +217,7 @@ export function jiraAuthUnavailableMessage(keychainService = process.env.JIRA_KE
 }
 
 function getAuthHeaders() {
+  assertPluginEnabled('jira');
   jiraBaseUrl = configuredJiraBaseUrl();
   if (!jiraBaseUrl) return null;
   if (process.env.JIRA_AUTH_HEADER) {
@@ -240,6 +242,7 @@ function getAuthHeaders() {
 }
 
 function getConfluenceAuthHeaders() {
+  assertPluginEnabled('confluence');
   if (process.env.CONFLUENCE_AUTH_HEADER) {
     return { Authorization: process.env.CONFLUENCE_AUTH_HEADER };
   }
@@ -315,6 +318,7 @@ function getConfluenceKeychainAuthorization() {
 }
 
 async function getCatchupJiraAuthHeaders() {
+  assertPluginEnabled('jira');
   jiraBaseUrl = configuredJiraBaseUrl();
   if (!jiraBaseUrl) return null;
   if (process.env.JIRA_AUTH_HEADER) {
