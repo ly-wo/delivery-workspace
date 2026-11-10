@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { isWorkspaceBuild, type WorkspaceBuild, type WorkspaceVersion } from '../shared/workspace-version.js';
+import { isWorkspaceBuild, type WorkspaceBuild, type WorkspaceVersion } from '../shared/workspace-version.ts';
 
 // 只摘要运行时代码和依赖声明；不扫描工作区、会话、凭据或 .data。
 export async function backendSourceHash(root: string): Promise<string> {
