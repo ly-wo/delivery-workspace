@@ -927,12 +927,13 @@ async function fetchJiraHandoff(url, options, readOnly = (options.method || 'GET
 
 // 事项详情使用同一份本机认证，资源由服务端操作映射生成，浏览器不能传入 URL。
 export async function jiraIssueRequest(resource, method = 'GET', body) {
+  if (resource === 'project' && method !== 'GET') throw new Error('项目元数据仅支持只读');
   if (typeof resource !== 'string' || resource.includes('..') || resource.startsWith('/')
-    || !/^(?:issue(?:\/|\?|$)|issueLink(?:Type)?(?:\?|$)|mypermissions\?|myself$|user\/assignable\/search\?|attachment\/content\/\d+$)/.test(resource)
+    || !/^(?:issue(?:\/|\?|$)|issueLink(?:Type)?(?:\?|$)|mypermissions\?|myself$|project$|user\/assignable\/search\?|attachment\/content\/\d+$)/.test(resource)
     || !['GET', 'POST', 'PUT', 'DELETE'].includes(method)) throw new Error('不支持的 Jira 事项资源');
   const auth = getAuthHeaders();
   if (!auth) throw new Error(jiraAuthUnavailableMessage());
-  let target = new URL(`/rest/api/2/${resource}`, jiraBaseUrl);
+  let target = new URL(`${jiraBaseUrl.replace(/\/+$/, '')}/rest/api/2/${resource}`);
   if (target.origin !== new URL(jiraBaseUrl).origin) throw new Error('Jira 资源来源不正确');
   const read = async url => {
     const response = await fetchJiraHandoff(url, { headers: { ...auth, Accept: 'application/json' }, redirect: 'manual' });

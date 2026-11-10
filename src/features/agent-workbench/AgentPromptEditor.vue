@@ -12,6 +12,7 @@ import { useAgentMentions, type AgentMentionKind } from './useAgentMentions';
 import { useAgentAttachments, type AgentAttachmentDraft } from './useAgentAttachments';
 import type { AgentBusinessMention } from './agent-business-context';
 import AgentNotePreview from './AgentNotePreview.vue';
+import PluginContextPicker from '../custom-plugins/PluginContextPicker.vue';
 
 const props = withDefaults(defineProps<{ workspacePath: string; provider?: AgentProvider; modes?: AgentRunMode[]; selectedMode?: AgentRunMode;
   modeLocked?: boolean; businessOptions?: AgentBusinessMention[]; attachmentDraft?: AgentAttachmentDraft; disabled?: boolean; inputLabel?: string; placeholder?: string; minRows?: number; maxRows?: number; submitOnEnter?: boolean }>(), {
@@ -106,6 +107,7 @@ function onDrop(event: DragEvent) { attachedFiles.fromTransfer(event.dataTransfe
       <el-button text size="small" :class="{ active: !preview }" @click="preview = false"><Pencil :size="13" /> 编辑</el-button>
       <el-button text size="small" :class="{ active: preview }" :disabled="!draft.trim()" @click="preview = true"><Eye :size="13" /> 预览</el-button>
     </div>
+    <PluginContextPicker v-model="draft" :disabled="disabled" />
     <div class="editor-body" @paste="onPaste" @dragover.prevent @drop="onDrop">
       <div v-if="attachments.length" class="image-list" aria-label="已添加附件">
         <figure v-for="attachment in attachments" :key="attachment.id">

@@ -32,6 +32,7 @@ const view = computed(() => workspaceView(route.query.view));
 watch(view, current => { document.title = `${current?.label || 'Agent Studio'} · Delivery Workspace`; }, { immediate: true });
 const section = computed(() => workspaceSections.find(group => group.items.some(item => item.id === view.value?.id)));
 const panels = {
+  plugins: defineAsyncComponent(() => import('../../features/custom-plugins/CustomPluginWorkspace.vue')),
   interfaces: defineAsyncComponent(() => import('../../features/interface-center/InterfaceCenter.vue')),
   requirements: defineAsyncComponent(() => import('../../features/requirement-development/OverseasRequirements.vue')),
   'integration-execution': defineAsyncComponent(() => import('../../features/refactor-control/RefactorControl.vue')),

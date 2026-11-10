@@ -68,6 +68,8 @@ curl -fsS http://127.0.0.1:5199/api/health
 | `/messages` | 企业微信消息编辑、预览、草稿、模板与本机历史 |
 | `/lab` | Mastra 暂停、审核、恢复与冲突演示 |
 
+待办、备忘等功能可从本机插件目录添加，详见 [自定义功能插件指南](docs/custom-plugin-guide.md)。示例位于 `plugins/todos` 和 `plugins/example-notes`，默认不自动安装。
+
 新增接入插件请参照 [插件接入规范](docs/plugin-integration-spec.md)，其中包含当前契约、开发步骤、客户端示例和针对性验收要求。
 
 ## 仓库结构

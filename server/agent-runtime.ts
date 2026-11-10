@@ -3466,6 +3466,8 @@ export async function createAgentRuntimeService(directory: string, options: Serv
       finally { await exclusive(async () => { hostWorkspaceLocks.delete(owner); await launchReadyQueues(); }); }
     },
     getRun: (id: string) => runs.find(run => run.id === id),
+    knowledgeCitations: (reference: string) => runs.filter(run => run.knowledgeContext?.includes(reference) || run.supplements?.some(item => item.knowledgeContext?.includes(reference)))
+      .map(run => ({ runId: run.id, title: run.objective.slice(0, 120), createdAt: run.createdAt, url: `/agent?run=${encodeURIComponent(run.id)}` })).slice(0, 50),
     isRunActive: (id: string) => active.has(id) || waiting.has(id),
     teamRuns: (taskId?: string) => runs.filter(run => run.team && (!taskId || run.team.taskId === taskId)),
     startTeamNode: (input: StartAgentRunInput, metadata: Parameters<typeof startTeamNode>[1]) => exclusive(() => startTeamNode(input, metadata)),

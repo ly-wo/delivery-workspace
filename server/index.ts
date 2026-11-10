@@ -1,3 +1,6 @@
+import { createCustomPluginRuntime } from './plugins/custom-runtime.js';
+import { createPluginJira } from './plugins/host-jira.js';
+import { createCustomPluginRoutes } from './plugins/custom-routes.js';
 import { createPluginStore } from './plugins/store.mjs';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -137,6 +140,9 @@ const agentTranslate = createAgentTranslateService();
 // 团队流程派发前读取 Claude 额度，用尽时改用 Codex；需在运行时服务创建（及其启动恢复）之前就绪。
 const readClaudeUsage = createClaudeUsageReader();
 const agentUsage = await createAgentUsageStore(path.join(dataDirectory, 'agent-runtimes'), { writeJson: stateBackup.writeJson });
+const workspaceTodos = await createWorkspaceTodos(path.join(dataDirectory, 'workspace-todos'));
+const customPlugins = await createCustomPluginRuntime(path.join(dataDirectory, 'custom-plugins'), workspaceTodos);
+const pluginJira = await createPluginJira(path.join(dataDirectory, 'custom-plugins'), customPlugins, sourceBackend.jiraIssueRequest);
 const agentRuntimes = await createAgentRuntimeService(path.join(dataDirectory, 'agent-runtimes'), {
   browserRootDirectory: root,
   workspaceSnapshotExclusions: [dataDirectory, path.join(root, '.local', 'logs'),
@@ -146,10 +152,14 @@ const agentRuntimes = await createAgentRuntimeService(path.join(dataDirectory, '
     provider: run.provider, model: run.model, createdAt: run.createdAt, completedAt: run.updatedAt, round: run.task?.workflow?.round, usage: run.usage! }).then(() => {}),
   stateBackup,
   resolveKnowledge: async objective => (await Promise.all([
-    agentNotes.resolveReferences(objective), confluenceKnowledge.resolveReferences(objective),
+    agentNotes.resolveReferences(objective), confluenceKnowledge.resolveReferences(objective), customPlugins.resolveReferences(objective),
   ])).filter(Boolean).join('\n\n'),
   resolveAttachments: agentAttachments.resolve,
   removeAttachments: agentAttachments.remove,
+});
+const customPluginRoutes = createCustomPluginRoutes(customPlugins, pluginJira, { json, body, port,
+  examples: [{ name: '待办事项', directory: path.join(root, 'plugins/todos') }, { name: '项目备忘示例', directory: path.join(root, 'plugins/example-notes') }],
+  citations: reference => agentRuntimes.knowledgeCitations(reference),
 });
 const desktopAccounts = createDesktopAccountsService();
 const accountServices = Object.fromEntries(accountProviders.map(provider =>
@@ -243,7 +253,7 @@ const integration = await createIntegrationStore(dataDirectory, integrationCatal
 const apexBffReview = await createApexBffReviewStore(dataDirectory, integrationCatalog);
 const wecomIntegration = await createWecomIntegration(dataDirectory, { catalog: integrationCatalog });
 const integrationPlugins = await createPluginStore({ wecomConfig: () => wecomIntegration.config() });
-const workspaceTodos = await createWorkspaceTodos(path.join(dataDirectory, 'workspace-todos'));
+
 const overseasRequirements = await createOverseasRequirements(path.join(dataDirectory, 'overseas-requirements'),
   id => requirementDevelopment.list().some(record => record.id === id));
 const reportBot = await createWecomIntegration(path.join(dataDirectory, 'workspace-reports'), {
@@ -498,6 +508,7 @@ const server = http.createServer(async (request, response) => {
   if (mutation) pendingMutations++;
   try {
     if (url.pathname.startsWith('/api/')) {
+      if (await customPluginRoutes(request, response, url)) return;
       if (await systemCatalogRoutes(request, response, url)) return;
       if (await interfaceCenterRoutes(request, response, url)) return;
       if (url.pathname.startsWith('/api/jira/issues/')) { await jiraIssueRoute(request, response, port); return; }
@@ -1162,7 +1173,7 @@ function shutdown() {
   await remoteDelivery.close();
   await systemCatalog.close();
   await interfaceCenter.close();
-  server.close(); await workspaceReports.close(); await groupChat?.close(); await refactorControl.close(workspaceRestart.isRestarting()); await refactorWorkspace.close(); await agentTeams?.close(); await teamGovernance.close(); sourceBackend.close(); await Promise.all(Object.values(accountServices).map(accounts => accounts.close())); await stopStateBackup(); await Promise.all([requirementDevelopment.close(), deliveryAcceptance.close(), jiraFix.close(), jiraFixHandoff.close(), jiraDev.close()]); await Promise.all([cliQueue.close(), agentRuntimes.close(), designExecutor.close(), integration.close(), confluenceKnowledge.close(), apexBffReview.close(), wecomIntegration.close(), reportBot.close(), deployments.close(), yunxiaoDeployments.close()]); await vite?.close(); await agentUsage.close(); await service.close(); await stateBackup.close(); await releaseStateLease(); process.exit(0);
+  server.close(); await pluginJira.close(); await customPlugins.close(); await workspaceReports.close(); await groupChat?.close(); await refactorControl.close(workspaceRestart.isRestarting()); await refactorWorkspace.close(); await agentTeams?.close(); await teamGovernance.close(); sourceBackend.close(); await Promise.all(Object.values(accountServices).map(accounts => accounts.close())); await stopStateBackup(); await Promise.all([requirementDevelopment.close(), deliveryAcceptance.close(), jiraFix.close(), jiraFixHandoff.close(), jiraDev.close()]); await Promise.all([cliQueue.close(), agentRuntimes.close(), designExecutor.close(), integration.close(), confluenceKnowledge.close(), apexBffReview.close(), wecomIntegration.close(), reportBot.close(), deployments.close(), yunxiaoDeployments.close()]); await vite?.close(); await agentUsage.close(); await service.close(); await stateBackup.close(); await releaseStateLease(); process.exit(0);
   })();
 }
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { void shutdown(); });

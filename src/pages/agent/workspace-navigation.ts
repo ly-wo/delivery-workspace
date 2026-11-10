@@ -5,7 +5,7 @@ export const workspaceSections = [
   { id: 'projects', label: '项目与 Git', items: [{ id: 'projects', label: '本地项目与 Git', path: '/projects' }, { id: 'systems', label: '系统导航', path: '/systems' }, { id: 'ports', label: '端口检测', path: '/ports' }, { id: 'deployments', label: '项目部署', path: '/deployments' }] },
   { id: 'execution', label: 'AI 交付', items: [{ id: 'design', label: '需求开发', path: '/design' }, { id: 'requirements', label: '需求管理', path: '/requirements' }, { id: 'integration-execution', label: '重构管理', path: '/refactor/control' }, { id: 'jira-fix', label: 'Jira 修复', path: '/agent?view=jira-fix' }, { id: 'queue', label: '执行中心', path: '/delivery/queue', mode: 'queue' }] },
   { id: 'integration', label: '接口联调', items: [{ id: 'interfaces', label: '接口联调中心', path: '/interfaces' }] },
-  { id: 'automation', label: '自动化 / 设置', items: [{ id: 'settings', label: '连接与策略设置', path: '/settings' }, { id: 'automation', label: '自动化与报告', path: '/agent?view=automation' }, { id: 'messages', label: '手动群消息', path: '/messages' }] },
+  { id: 'automation', label: '自动化 / 设置', items: [{ id: 'settings', label: '连接与策略设置', path: '/settings' }, { id: 'plugins', label: '功能插件', path: '/agent?view=plugins' }, { id: 'automation', label: '自动化与报告', path: '/agent?view=automation' }, { id: 'messages', label: '手动群消息', path: '/messages' }] },
 ] as const;
 export const workspaceViews = workspaceSections.flatMap(section => [...section.items]);
 export const legacyExecutionPaths = { '/delivery/plan': 'plan', '/delivery/runs': 'runs' } as const;
