@@ -21,6 +21,8 @@
 
 ## 接入插件
 
+开发新的接入请参照 [插件接入规范](plugin-integration-spec.md)；本节说明使用者如何配置已有插件。
+
 在「设置 → 连接」的「接入插件」统一管理 Jira、Confluence 和企微通知 Webhook。每个插件提供启用开关和配置表单；Jira/Confluence 可执行只读用户查询，企微只检查地址格式，实际发送仍使用消息页的预览与确认。
 
 配置保存在 `${DELIVERY_DATA_DIR:-.data}/credentials/plugins.json`，文件权限为 `0600`，不会回传 Token 或 Webhook。保存后，等待当前任务结束，再重启本次工作台进程；页面提示“配置待重启生效”时，旧连接仍在使用。不要将该文件加入源码分享包。

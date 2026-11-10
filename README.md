@@ -68,6 +68,8 @@ curl -fsS http://127.0.0.1:5199/api/health
 | `/messages` | 企业微信消息编辑、预览、草稿、模板与本机历史 |
 | `/lab` | Mastra 暂停、审核、恢复与冲突演示 |
 
+新增接入插件请参照 [插件接入规范](docs/plugin-integration-spec.md)，其中包含当前契约、开发步骤、客户端示例和针对性验收要求。
+
 ## 仓库结构
 
 `src/` 是 Vue 3 + Element Plus 前端；`server/` 是本地 API、CLI 运行时与内嵌 Jira/交付后端；`shared/` 是前后端契约和中性示例；`scripts/` 是启动与联调辅助脚本；`tools/remote-access/` 是独立远程网关；`support/` 提供 Skill 和交付规范；`test/` 提供自动测试。
