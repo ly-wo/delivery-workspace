@@ -10,8 +10,8 @@ import RequirementDevelopment from '../../features/requirement-development/Requi
 import { useIntegrationPlugins, integrationComponents } from '../../plugins/runtime';
 import { useCustomPlugins } from '../../features/custom-plugins/api';
 import WorkspacePanelViewport from '../../shared/ui/WorkspacePanelViewport.vue';
-import { Braces, CircleCheck, FolderGit2, LayoutGrid, MessagesSquare, Settings2, Sun, Terminal } from '@lucide/vue';
-import { menuIcons } from '../../shared/menu-icons';
+import { LayoutGrid, MessagesSquare } from '@lucide/vue';
+import { workspaceMenuIcons } from '../../shared/menu-icons';
 import ThemePicker from '../../shared/theme/ThemePicker.vue';
 
 const route = useRoute(), router = useRouter();
@@ -20,7 +20,7 @@ const customPlugins = useCustomPlugins();
 const workspaceSections = computed(() => registeredWorkspaceSections(integrations.active.value.map(plugin => plugin.id), customPlugins.plugins.value, customPlugins.navigation.value));
 const pluginReady = computed(() => !view.value?.pluginId || integrations.available(view.value.pluginId));
 const localPort = window.location.port || '5288';
-const navigationIcons: Record<string, any> = { today: Sun, tasks: CircleCheck, projects: FolderGit2, execution: Terminal, integration: Braces, automation: Settings2, plugins: LayoutGrid, ...menuIcons };
+const navigationIcons = workspaceMenuIcons;
 const navigationLabels: Record<string, string> = { today: '今日', projects: '项目', execution: 'AI 交付', integration: '联调', automation: '设置' };
 const workspace = ref<InstanceType<typeof AgentWorkspace>>();
 const panelStates = new Map<string, unknown>();
@@ -36,7 +36,10 @@ provide(agentWorkspaceContext, {
 });
 const view = computed(() => workspaceView(route.query.view, customPlugins.plugins.value, route.query.plugin));
 watch(view, current => { document.title = `${current?.label || 'Agent Studio'} · Delivery Workspace`; }, { immediate: true });
-const section = computed(() => workspaceSections.value.find(group => group.items.some(item => item.id === view.value?.id)));
+const section = computed(() => {
+  const groups = registeredWorkspaceSections(integrations.active.value.map(plugin => plugin.id), customPlugins.plugins.value.map(plugin => ({ ...plugin, showInMenu: true })), customPlugins.navigation.value);
+  return groups.find(group => group.items.some(item => item.id === view.value?.id));
+});
 const panels = {
   plugins: defineAsyncComponent(() => import('../../features/custom-plugins/CustomPluginWorkspace.vue')),
   interfaces: defineAsyncComponent(() => import('../../features/interface-center/InterfaceCenter.vue')),
@@ -119,7 +122,7 @@ function openThread(event: MouseEvent) {
         <header class="workspace-page-head">
           <div class="workspace-page-identity">
             <span class="workspace-page-symbol"><component :is="navigationIcons[section.icon || section.id] || LayoutGrid" v-if="section" :size="22" /></span>
-            <div><p v-if="!view.customPluginId">{{ section?.label }}</p><h1>{{ view.label }}</h1></div>
+            <div><p>{{ view.customPluginId ? '功能插件' : section?.label }}</p><h1>{{ view.label }}</h1></div>
           </div>
           <div class="workspace-page-tools"><span id="workspace-connection-status"></span><span class="workspace-mobile-theme"><ThemePicker /></span><button class="workspace-back" type="button" aria-label="返回会话" title="返回会话" @click="open()"><MessagesSquare :size="15" /><span>返回会话</span></button></div>
           <nav v-if="!view.customPluginId || (section?.items.length || 0) > 1" class="workspace-view-tabs" aria-label="工作面板视图"><button v-for="item in section?.items" :key="item.id" type="button" :aria-current="view.id === item.id ? 'page' : undefined" @click="open(item.id)">{{ item.label }}</button></nav>

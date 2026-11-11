@@ -66,3 +66,35 @@ test('menu preferences order both built-in and plugin menus without losing new o
   const restored = applyNavigationPreferences([...sections, { id: 'unavailable', label: '恢复', items: [] }], preferences);
   assert.deepEqual(restored.map(s => s.id), ['custom:notes', 'unavailable', 'today', 'projects']);
 });
+
+test('hiding a menu keeps the open plugin page identity and resource URL stable', async () => {
+  const { inspectCustomPlugin } = await import('../server/plugins/custom-runtime');
+  const { registeredWorkspaceSections } = await import('../src/pages/agent/workspace-navigation');
+  const path = await import('node:path');
+  const plugin = { ...await inspectCustomPlugin(path.resolve('plugins/todos')), enabled: true, showInMenu: true, grants: [] };
+  const before = workspaceView('plugins', [plugin], plugin.manifest.id);
+  const hidden = { ...plugin, showInMenu: false };
+  assert.deepEqual(workspaceView('plugins', [hidden], plugin.manifest.id), before);
+  assert.equal(registeredWorkspaceSections([], [hidden]).some(section => section.id === before?.id), false);
+});
+
+test('saving default order or only an icon leaves future menus in their default insertion position', async () => {
+  const { navigationPreferencesForSave, applyNavigationPreferences } = await import('../src/pages/agent/workspace-navigation');
+  const defaults = { order: [], icons: { today: 'star' as const } };
+  const saved = navigationPreferencesForSave(defaults, ['today', 'automation'], false);
+  assert.deepEqual(saved.order, []);
+  const expanded = [{ id: 'today', label: '今日', items: [] }, { id: 'custom:new', label: '新插件', items: [] }, { id: 'automation', label: '设置', items: [] }];
+  assert.deepEqual(applyNavigationPreferences(expanded, saved).map(s => s.id), ['today', 'custom:new', 'automation']);
+  const previous = { order: ['hidden', 'today', 'automation'], icons: {} };
+  assert.deepEqual(navigationPreferencesForSave(previous, ['automation', 'today'], true).order, ['automation', 'today', 'hidden']);
+  assert.deepEqual(navigationPreferencesForSave(previous, ['today', 'automation'], false), previous);
+});
+
+test('menu editor uses the actual built-in icon registry rather than approximate defaults', async () => {
+  const { CircleCheck, Terminal, LayoutGrid } = await import('@lucide/vue');
+  const { workspaceMenuIcons, menuIcons } = await import('../src/shared/menu-icons');
+  assert.equal(workspaceMenuIcons.tasks, CircleCheck);
+  assert.equal(workspaceMenuIcons.execution, Terminal);
+  assert.equal(workspaceMenuIcons.plugins, LayoutGrid);
+  for (const [id, component] of Object.entries(menuIcons)) assert.equal(workspaceMenuIcons[id], component);
+});

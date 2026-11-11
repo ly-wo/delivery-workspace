@@ -14,11 +14,14 @@ export const workspaceSections: WorkspaceSection[] = [
 export const pluginViews: WorkspaceView[] = integrationCatalog.flatMap(plugin => plugin.views.map(view => ({...view, pluginId: plugin.id})));
 // All declared URLs remain resolvable even while a provider is disabled. Rendering is gated separately.
 export const workspaceViews = [...workspaceSections.flatMap(section => section.items), ...pluginViews];
-export function customPluginViews(plugins: CustomPluginInfo[]): WorkspaceView[] {
- return plugins.filter(plugin => plugin.enabled && plugin.showInMenu && !plugin.error).map(plugin => ({
+function customPluginPage(plugin: CustomPluginInfo): WorkspaceView {
+ return {
   id: `custom:${plugin.manifest.id}`, label: plugin.manifest.name, customPluginId: plugin.manifest.id,
   path: `/agent?view=plugins&plugin=${encodeURIComponent(plugin.manifest.id)}`,
- }));
+ };
+}
+export function customPluginViews(plugins: CustomPluginInfo[]): WorkspaceView[] {
+ return plugins.filter(plugin => plugin.enabled && plugin.showInMenu && !plugin.error).map(customPluginPage);
 }
 export function registeredWorkspaceSections(activeIds: string[], customPlugins: CustomPluginInfo[] = [], navigation: NavigationPreferences = { order: [], icons: {} }) {
  const sections = workspaceSections.map(section => ({...section, items: [...section.items]}));
@@ -37,8 +40,9 @@ export function applyNavigationPreferences(sections: WorkspaceSection[], prefere
 export const legacyExecutionPaths = { '/delivery/plan': 'plan', '/delivery/runs': 'runs' } as const;
 export function workspaceView(value: unknown, customPlugins: CustomPluginInfo[] = [], selectedPlugin?: unknown) {
   if (value === 'plugins' && typeof selectedPlugin === 'string') {
-    const custom = customPluginViews(customPlugins).find(view => view.customPluginId === selectedPlugin);
-    if (custom) return custom;
+    // Menu visibility is presentation only: keep the page identity (and unsaved edits) stable.
+    const plugin = customPlugins.find(plugin => plugin.manifest.id === selectedPlugin && plugin.enabled && !plugin.error);
+    if (plugin) return customPluginPage(plugin);
   }
   const id = value === 'plan' || value === 'runs' ? 'queue' : value;
   return typeof id === 'string' ? workspaceViews.find(item => item.id === id) : undefined;
@@ -49,4 +53,8 @@ export function workspaceLocation(path: string, query: Record<string, unknown> =
   };
   const item = workspaceViews.find(view => view.path === path);
   return item ? { path: '/agent', query: { ...query, view: item.id } } : undefined;
+}
+
+export function navigationPreferencesForSave(preferences: NavigationPreferences, orderedIds: string[], reordered: boolean): NavigationPreferences {
+ return { order: reordered ? [...orderedIds, ...preferences.order.filter(id => !orderedIds.includes(id))] : [...preferences.order], icons: { ...preferences.icons } };
 }
