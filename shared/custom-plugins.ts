@@ -34,7 +34,7 @@ export type CustomPluginManifest = z.infer<typeof pluginManifestSchema>;
 export type PluginCapability = z.infer<typeof capabilitySchema>;
 export interface PluginRecord { id: string; values: Record<string, string>; createdAt: string; updatedAt: string }
 export interface PluginResource { reference: string; pluginId: string; resourceType: string; id: string; title: string; excerpt: string; updatedAt: string; version: string; url: string; content?: string }
-export interface CustomPluginInfo { manifest: CustomPluginManifest; enabled: boolean; grants: PluginCapability[]; source: string; digest: string; error?: string }
+export interface CustomPluginInfo { manifest: CustomPluginManifest; enabled: boolean; showInMenu: boolean; grants: PluginCapability[]; source: string; digest: string; error?: string }
 export const pluginReference = (pluginId: string, type: string, id: string) => `plugin:${pluginId}/${type}/${id}`;
 export const pluginReferencePattern = /\bplugin:([a-z][a-z0-9-]{1,63})\/([a-z][a-z0-9-]{0,39})\/([a-zA-Z0-9-]{1,80})\b/g;
 export function pluginReferences(text: string) { return [...new Set([...text.matchAll(new RegExp(pluginReferencePattern))].map(match => match[0]))]; }

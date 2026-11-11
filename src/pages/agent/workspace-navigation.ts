@@ -1,5 +1,6 @@
+import type { CustomPluginInfo } from '../../../shared/custom-plugins';
 import { integrationCatalog } from '../../../shared/integration-plugins';
-export interface WorkspaceView { id: string; label: string; path: string; mode?: string; pluginId?: string; component?: string }
+export interface WorkspaceView { id: string; label: string; path: string; mode?: string; pluginId?: string; component?: string; customPluginId?: string }
 export interface WorkspaceSection { id: string; label: string; shortLabel?: string; icon?: string; items: WorkspaceView[] }
 /** 统一工作入口；旧地址跳转到同一面板，不再挂载另一套导航。 */
 export const workspaceSections: WorkspaceSection[] = [
@@ -12,16 +13,27 @@ export const workspaceSections: WorkspaceSection[] = [
 export const pluginViews: WorkspaceView[] = integrationCatalog.flatMap(plugin => plugin.views.map(view => ({...view, pluginId: plugin.id})));
 // All declared URLs remain resolvable even while a provider is disabled. Rendering is gated separately.
 export const workspaceViews = [...workspaceSections.flatMap(section => section.items), ...pluginViews];
-export function registeredWorkspaceSections(activeIds: string[]) {
+export function customPluginViews(plugins: CustomPluginInfo[]): WorkspaceView[] {
+ return plugins.filter(plugin => plugin.enabled && plugin.showInMenu && !plugin.error).map(plugin => ({
+  id: `custom:${plugin.manifest.id}`, label: plugin.manifest.name, customPluginId: plugin.manifest.id,
+  path: `/agent?view=plugins&plugin=${encodeURIComponent(plugin.manifest.id)}`,
+ }));
+}
+export function registeredWorkspaceSections(activeIds: string[], customPlugins: CustomPluginInfo[] = []) {
  const sections = workspaceSections.map(section => ({...section, items: [...section.items]}));
  for (const plugin of integrationCatalog.filter(item => activeIds.includes(item.id))) {
   if (plugin.section && !sections.some(section => section.id === plugin.section!.id)) sections.splice(1, 0, {...plugin.section, items: []});
   for (const view of plugin.views) sections.find(section => section.id === view.section)?.items.push(pluginViews.find(item => item.id === view.id)!);
  }
+ for (const view of customPluginViews(customPlugins)) sections.splice(sections.length - 1, 0, { id: view.id, label: view.label, icon: 'plugins', items: [view] });
  return sections.filter(section => section.items.length);
 }
 export const legacyExecutionPaths = { '/delivery/plan': 'plan', '/delivery/runs': 'runs' } as const;
-export function workspaceView(value: unknown) {
+export function workspaceView(value: unknown, customPlugins: CustomPluginInfo[] = [], selectedPlugin?: unknown) {
+  if (value === 'plugins' && typeof selectedPlugin === 'string') {
+    const custom = customPluginViews(customPlugins).find(view => view.customPluginId === selectedPlugin);
+    if (custom) return custom;
+  }
   const id = value === 'plan' || value === 'runs' ? 'queue' : value;
   return typeof id === 'string' ? workspaceViews.find(item => item.id === id) : undefined;
 }

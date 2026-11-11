@@ -160,3 +160,34 @@ test('custom plugin routes reject cross-origin mutations, require explicit confi
   const saved = await (await fetch(base + '/example-notes/save', { method: 'POST', headers, body: JSON.stringify({ values: { title: '接口验证' } }) })).json();
   assert.ok(saved.id); assert.doesNotMatch(await (await fetch(base)).text(), /AUTH_HEADER|API_TOKEN|Cookie/);
 });
+
+test('menu preference persists without changing grants or records and supports legacy installations', async t => {
+  const f = await fixture(t); await f.install(notePackage);
+  const note = await f.runtime.saveRecord('example-notes', { values: { title: '菜单切换保留数据' } });
+  const before = f.runtime.list().plugins[0];
+  assert.equal(before.showInMenu, false);
+  await f.runtime.change('example-notes', { showInMenu: true });
+  const restarted = await createCustomPluginRuntime(path.join(f.root, 'plugins'), f.todos);
+  assert.equal(restarted.list().plugins[0].showInMenu, true);
+  assert.deepEqual(restarted.list().plugins[0].grants, before.grants);
+  await restarted.change('example-notes', { enabled: false });
+  assert.equal(restarted.list().plugins[0].showInMenu, true);
+  await restarted.change('example-notes', { enabled: true, showInMenu: false });
+  assert.equal((await restarted.records('example-notes'))[0].id, note.id);
+  await assert.rejects(restarted.change('example-notes', { showInMenu: 'yes' }));
+  await restarted.change('example-notes', { showInMenu: true, remove: true });
+  assert.equal(restarted.list().plugins.length, 0);
+  const preview = await restarted.inspect(notePackage);
+  await restarted.install({ directory: notePackage, digest: preview.digest, grants: preview.manifest.permissions, confirmed: true });
+  assert.equal(restarted.list().plugins[0].showInMenu, true);
+  const file = path.join(f.root, 'plugins', 'installed.json');
+  const legacy = JSON.parse(await fs.readFile(file, 'utf8'));
+  delete legacy.plugins[0].showInMenu;
+  await fs.writeFile(file, JSON.stringify(legacy));
+  const migrated = await createCustomPluginRuntime(path.join(f.root, 'plugins'), f.todos);
+  assert.equal(migrated.list().plugins[0].showInMenu, false);
+  assert.equal((await migrated.records('example-notes'))[0].id, note.id);
+  const todo = await migrated.inspect(todoPackage);
+  await migrated.install({ directory: todoPackage, digest: todo.digest, grants: todo.manifest.permissions, confirmed: true, showInMenu: true });
+  assert.equal(migrated.list().plugins.find(p => p.manifest.id === 'personal-todos')?.showInMenu, true);
+});

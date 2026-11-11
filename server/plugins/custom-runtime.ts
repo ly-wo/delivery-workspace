@@ -32,7 +32,7 @@ export async function inspectCustomPlugin(directory: string) {
   return { manifest, source: root, digest: fingerprint(manifest) };
 }
 const recordSchema = z.object({ id: z.uuid(), values: z.record(z.string(), z.string()), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime() }).strict();
-const installedSchema = z.object({ manifest: pluginManifestSchema, source: z.string(), digest: z.string(), enabled: z.boolean(), grants: z.array(capabilitySchema), removed: z.boolean().optional() }).strict();
+const installedSchema = z.object({ manifest: pluginManifestSchema, source: z.string(), digest: z.string(), enabled: z.boolean(), showInMenu: z.boolean().default(false), grants: z.array(capabilitySchema), removed: z.boolean().optional() }).strict();
 type Installed = z.infer<typeof installedSchema>;
 export async function createCustomPluginRuntime(directory: string, todos: Awaited<ReturnType<typeof createWorkspaceTodos>>) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
@@ -117,24 +117,25 @@ export async function createCustomPluginRuntime(directory: string, todos: Awaite
     },
     inspect: inspectCustomPlugin,
     install(raw: unknown) { return serial(async () => {
-      const input = z.object({ directory: z.string(), digest: z.string(), grants: z.array(capabilitySchema), confirmed: z.literal(true) }).strict().parse(raw);
+      const input = z.object({ directory: z.string(), digest: z.string(), grants: z.array(capabilitySchema), confirmed: z.literal(true), showInMenu: z.boolean().optional() }).strict().parse(raw);
       const entry = await inspectCustomPlugin(input.directory);
       if (input.digest !== entry.digest) throw new Error('插件内容已变化，请重新检查并授权');
       const previous = installed.get(entry.manifest.id);
       if (previous && !previous.removed) throw new Error('插件 ID 已存在，请勿重复添加');
       if (previous && previous.digest !== entry.digest) throw new Error('存在该插件的历史数据，声明已变化；需要先提供数据迁移，不会覆盖');
       if (input.grants.some(grant => !entry.manifest.permissions.includes(grant))) throw new Error('不能授予插件未声明的能力');
-      const installedEntry: Installed = { ...entry, enabled: true, grants: [...new Set(input.grants)] };
+      const installedEntry: Installed = { ...entry, enabled: true, showInMenu: input.showInMenu ?? previous?.showInMenu ?? false, grants: [...new Set(input.grants)] };
       installed.set(entry.manifest.id, installedEntry);
       try { await saveState(); } catch (error) { if (previous) installed.set(entry.manifest.id, previous); else installed.delete(entry.manifest.id); throw error; }
       return this.list();
     }); },
     change(id: string, raw: unknown) { return serial(async () => {
-      const input = z.object({ enabled: z.boolean().optional(), remove: z.boolean().optional(), grants: z.array(capabilitySchema).optional() }).strict().parse(raw);
+      const input = z.object({ enabled: z.boolean().optional(), showInMenu: z.boolean().optional(), remove: z.boolean().optional(), grants: z.array(capabilitySchema).optional() }).strict().parse(raw);
       const current = info(id, false), next = { ...current };
       if (input.grants?.some(grant => !current.manifest.permissions.includes(grant))) throw new Error('不能扩大到未声明的能力');
       if (input.grants) next.grants = [...new Set(input.grants)];
       if (input.enabled !== undefined) next.enabled = input.enabled;
+      if (input.showInMenu !== undefined) next.showInMenu = input.showInMenu;
       if (input.remove) { next.removed = true; next.enabled = false; }
       installed.set(id, next);
       try { await saveState(); } catch (error) { installed.set(id, current); throw error; }

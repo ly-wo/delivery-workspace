@@ -8,16 +8,18 @@ import { registeredWorkspaceSections, workspaceView } from './workspace-navigati
 import { agentWorkspaceContext } from '../../shared/agent-workspace-context';
 import RequirementDevelopment from '../../features/requirement-development/RequirementDevelopment.vue';
 import { useIntegrationPlugins, integrationComponents } from '../../plugins/runtime';
+import { useCustomPlugins } from '../../features/custom-plugins/api';
 import WorkspacePanelViewport from '../../shared/ui/WorkspacePanelViewport.vue';
 import { Braces, CircleCheck, FolderGit2, LayoutGrid, MessagesSquare, Settings2, Sun, Terminal } from '@lucide/vue';
 import ThemePicker from '../../shared/theme/ThemePicker.vue';
 
 const route = useRoute(), router = useRouter();
 const integrations = useIntegrationPlugins();
-const workspaceSections = computed(() => registeredWorkspaceSections(integrations.active.value.map(plugin => plugin.id)));
+const customPlugins = useCustomPlugins();
+const workspaceSections = computed(() => registeredWorkspaceSections(integrations.active.value.map(plugin => plugin.id), customPlugins.plugins.value));
 const pluginReady = computed(() => !view.value?.pluginId || integrations.available(view.value.pluginId));
 const localPort = window.location.port || '5288';
-const navigationIcons: Record<string, any> = { today: Sun, tasks: CircleCheck, projects: FolderGit2, execution: Terminal, integration: Braces, automation: Settings2 };
+const navigationIcons: Record<string, any> = { today: Sun, tasks: CircleCheck, projects: FolderGit2, execution: Terminal, integration: Braces, automation: Settings2, plugins: LayoutGrid };
 const navigationLabels: Record<string, string> = { today: '今日', projects: '项目', execution: 'AI 交付', integration: '联调', automation: '设置' };
 const workspace = ref<InstanceType<typeof AgentWorkspace>>();
 const panelStates = new Map<string, unknown>();
@@ -31,7 +33,7 @@ provide(agentWorkspaceContext, {
   compose,
   openRun, readState: key => panelStates.get(key), saveState: (key, value) => { panelStates.set(key, value); },
 });
-const view = computed(() => workspaceView(route.query.view));
+const view = computed(() => workspaceView(route.query.view, customPlugins.plugins.value, route.query.plugin));
 watch(view, current => { document.title = `${current?.label || 'Agent Studio'} · Delivery Workspace`; }, { immediate: true });
 const section = computed(() => workspaceSections.value.find(group => group.items.some(item => item.id === view.value?.id)));
 const panels = {
@@ -52,18 +54,23 @@ const panels = {
 const panel = computed(() => {
   const id = view.value?.id;
   if (!id) return undefined;
+  if (view.value?.customPluginId) return panels.plugins;
   if (view.value?.pluginId) return pluginReady.value ? integrationComponents[view.value.pluginId]?.components[view.value.component || ''] : undefined;
   if (['plan', 'queue', 'runs'].includes(id)) return panels.execution;
   return panels[id as keyof typeof panels];
 });
 watch(() => route.query, query => {
-  const current = workspaceView(query.view);
+  const current = workspaceView(query.view, customPlugins.plugins.value, query.plugin);
   if (!current) return;
   panelLocations.set(current.id, { ...query });
   const group = workspaceSections.value.find(item => item.items.some(view => view.id === current.id));
   if (group) lastSectionViews.set(group.id, current.id);
 }, { immediate: true });
-function open(id?: string) { void router.push({ path: '/agent', query: id ? panelLocations.get(id) || { view: id } : {} }); }
+function open(id?: string) {
+  const custom = workspaceSections.value.flatMap(section => section.items).find(item => item.id === id)?.customPluginId;
+  const query = custom ? { view: 'plugins', plugin: custom } : id === 'plugins' ? { view: id } : id ? panelLocations.get(id) || { view: id } : {};
+  void router.push({ path: '/agent', query });
+}
 function openGroup(id = '') { void router.push({ path: '/agent', query: { group: '1', ...(id ? { room: id } : {}) } }); }
 function openRun(id: string) { if (id.startsWith('group:')) openGroup(id.slice(6)); else void router.push({ path: '/agent', query: { run: id } }); }
 watch([() => route.query.group, () => route.query.room, workspace, view], ([group, id, target]) => {
@@ -110,7 +117,7 @@ function openThread(event: MouseEvent) {
       <section v-if="view" class="workspace-panel" aria-label="工作面板">
         <header class="workspace-page-head">
           <div class="workspace-page-identity">
-            <span class="workspace-page-symbol"><component :is="navigationIcons[section.id]" v-if="section" :size="22" /></span>
+            <span class="workspace-page-symbol"><component :is="navigationIcons[section.icon || section.id] || LayoutGrid" v-if="section" :size="22" /></span>
             <div><p>{{ section?.label }}</p><h1>{{ view.label }}</h1></div>
           </div>
           <div class="workspace-page-tools"><span id="workspace-connection-status"></span><span class="workspace-mobile-theme"><ThemePicker /></span><button class="workspace-back" type="button" aria-label="返回会话" title="返回会话" @click="open()"><MessagesSquare :size="15" /><span>返回会话</span></button></div>
