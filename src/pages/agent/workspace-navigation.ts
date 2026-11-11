@@ -1,3 +1,4 @@
+import type { NavigationPreferences } from '../../../shared/workspace-navigation';
 import type { CustomPluginInfo } from '../../../shared/custom-plugins';
 import { integrationCatalog } from '../../../shared/integration-plugins';
 export interface WorkspaceView { id: string; label: string; path: string; mode?: string; pluginId?: string; component?: string; customPluginId?: string }
@@ -19,14 +20,19 @@ export function customPluginViews(plugins: CustomPluginInfo[]): WorkspaceView[] 
   path: `/agent?view=plugins&plugin=${encodeURIComponent(plugin.manifest.id)}`,
  }));
 }
-export function registeredWorkspaceSections(activeIds: string[], customPlugins: CustomPluginInfo[] = []) {
+export function registeredWorkspaceSections(activeIds: string[], customPlugins: CustomPluginInfo[] = [], navigation: NavigationPreferences = { order: [], icons: {} }) {
  const sections = workspaceSections.map(section => ({...section, items: [...section.items]}));
  for (const plugin of integrationCatalog.filter(item => activeIds.includes(item.id))) {
   if (plugin.section && !sections.some(section => section.id === plugin.section!.id)) sections.splice(1, 0, {...plugin.section, items: []});
   for (const view of plugin.views) sections.find(section => section.id === view.section)?.items.push(pluginViews.find(item => item.id === view.id)!);
  }
  for (const view of customPluginViews(customPlugins)) sections.splice(sections.length - 1, 0, { id: view.id, label: view.label, icon: 'plugins', items: [view] });
- return sections.filter(section => section.items.length);
+ return applyNavigationPreferences(sections.filter(section => section.items.length), navigation);
+}
+export function applyNavigationPreferences(sections: WorkspaceSection[], preferences: NavigationPreferences) {
+ const rank = new Map(preferences.order.map((id, index) => [id, index]));
+ return sections.map(section => ({ ...section, icon: preferences.icons[section.id] || section.icon }))
+  .sort((a, b) => (rank.get(a.id) ?? preferences.order.length) - (rank.get(b.id) ?? preferences.order.length));
 }
 export const legacyExecutionPaths = { '/delivery/plan': 'plan', '/delivery/runs': 'runs' } as const;
 export function workspaceView(value: unknown, customPlugins: CustomPluginInfo[] = [], selectedPlugin?: unknown) {

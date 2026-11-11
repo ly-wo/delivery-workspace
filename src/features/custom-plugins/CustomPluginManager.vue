@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkspaceMenuSettings from './WorkspaceMenuSettings.vue';
 import { onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
@@ -24,7 +25,7 @@ onMounted(() => run(load));
 </script>
 <template>
   <section class="surface manager">
-    <div class="surface-header"><div><h2>自定义功能插件</h2><p>添加待办、备忘等功能，按需授权工作台能力，添加和停用立即生效。</p></div><el-button :loading="busy" @click="run(load)">刷新</el-button></div>
+    <div class="surface-header"><div><h2>自定义功能插件</h2><p>添加待办、备忘等功能，按需授权工作台能力，添加和停用立即生效。</p></div><div class="plugin-controls"><WorkspaceMenuSettings /><el-button :loading="busy" @click="run(load)">刷新</el-button></div></div>
     <div class="manager-body">
       <el-alert v-for="error in data.errors" :key="error.id" :title="`${error.id}：${error.message}`" type="error" :closable="false" />
       <div class="install-row"><el-input v-model="directory" aria-label="插件目录" placeholder="本机插件目录的绝对路径" :disabled="busy" /><el-button :disabled="!directory.trim() || busy" @click="inspect">检查插件</el-button></div>

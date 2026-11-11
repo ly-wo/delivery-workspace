@@ -158,6 +158,11 @@ test('custom plugin routes reject cross-origin mutations, require explicit confi
   const installed = await fetch(base + '/install', { method: 'POST', headers, body: JSON.stringify({ directory: notePackage, digest: inspection.digest, grants: inspection.manifest.permissions, confirmed: true }) });
   assert.equal(installed.status, 200); assert.equal((await installed.json()).plugins.length, 1);
   const saved = await (await fetch(base + '/example-notes/save', { method: 'POST', headers, body: JSON.stringify({ values: { title: '接口验证' } }) })).json();
+  const navigation = { order: ['custom:example-notes', 'today'], icons: { 'custom:example-notes': 'notebook' } };
+  assert.equal((await fetch(base + '/navigation/settings', { method: 'POST', headers: { ...headers, Origin: 'https://untrusted.test' }, body: JSON.stringify(navigation) })).status, 403);
+  const menuSaved = await fetch(base + '/navigation/settings', { method: 'POST', headers, body: JSON.stringify(navigation) });
+  assert.equal(menuSaved.status, 200);
+  assert.deepEqual((await menuSaved.json()).navigation, navigation);
   assert.ok(saved.id); assert.doesNotMatch(await (await fetch(base)).text(), /AUTH_HEADER|API_TOKEN|Cookie/);
 });
 
@@ -190,4 +195,24 @@ test('menu preference persists without changing grants or records and supports l
   const todo = await migrated.inspect(todoPackage);
   await migrated.install({ directory: todoPackage, digest: todo.digest, grants: todo.manifest.permissions, confirmed: true, showInMenu: true });
   assert.equal(migrated.list().plugins.find(p => p.manifest.id === 'personal-todos')?.showInMenu, true);
+});
+
+test('menu order and built-in icons persist atomically without changing plugin data or permissions', async t => {
+  const f = await fixture(t); await f.install(notePackage);
+  const before = f.runtime.list().plugins;
+  assert.deepEqual(f.runtime.list().navigation, { order: [], icons: {} });
+  const navigation = { order: ['custom:example-notes', 'today', 'automation'], icons: { 'custom:example-notes': 'notebook', today: 'star' } };
+  await f.runtime.saveNavigation(navigation);
+  await f.runtime.change('example-notes', { showInMenu: true });
+  const restarted = await createCustomPluginRuntime(path.join(f.root, 'plugins'), f.todos);
+  assert.deepEqual(restarted.list().navigation, navigation);
+  assert.deepEqual(restarted.list().plugins[0].grants, before[0].grants);
+  for (const invalid of [{ order: ['today', 'today'], icons: {} }, { order: [], icons: { today: 'https://example.com/icon.svg' } }, { order: ['../escape'], icons: {} }]) {
+    await assert.rejects(restarted.saveNavigation(invalid));
+    assert.deepEqual(restarted.list().navigation, navigation);
+  }
+  const snapshot = restarted.list(); snapshot.navigation.order.reverse();
+  assert.deepEqual(restarted.list().navigation, navigation);
+  await restarted.saveNavigation({ order: [], icons: {} });
+  assert.deepEqual(restarted.list().navigation, { order: [], icons: {} });
 });

@@ -11,15 +11,16 @@ import { useIntegrationPlugins, integrationComponents } from '../../plugins/runt
 import { useCustomPlugins } from '../../features/custom-plugins/api';
 import WorkspacePanelViewport from '../../shared/ui/WorkspacePanelViewport.vue';
 import { Braces, CircleCheck, FolderGit2, LayoutGrid, MessagesSquare, Settings2, Sun, Terminal } from '@lucide/vue';
+import { menuIcons } from '../../shared/menu-icons';
 import ThemePicker from '../../shared/theme/ThemePicker.vue';
 
 const route = useRoute(), router = useRouter();
 const integrations = useIntegrationPlugins();
 const customPlugins = useCustomPlugins();
-const workspaceSections = computed(() => registeredWorkspaceSections(integrations.active.value.map(plugin => plugin.id), customPlugins.plugins.value));
+const workspaceSections = computed(() => registeredWorkspaceSections(integrations.active.value.map(plugin => plugin.id), customPlugins.plugins.value, customPlugins.navigation.value));
 const pluginReady = computed(() => !view.value?.pluginId || integrations.available(view.value.pluginId));
 const localPort = window.location.port || '5288';
-const navigationIcons: Record<string, any> = { today: Sun, tasks: CircleCheck, projects: FolderGit2, execution: Terminal, integration: Braces, automation: Settings2, plugins: LayoutGrid };
+const navigationIcons: Record<string, any> = { today: Sun, tasks: CircleCheck, projects: FolderGit2, execution: Terminal, integration: Braces, automation: Settings2, plugins: LayoutGrid, ...menuIcons };
 const navigationLabels: Record<string, string> = { today: '今日', projects: '项目', execution: 'AI 交付', integration: '联调', automation: '设置' };
 const workspace = ref<InstanceType<typeof AgentWorkspace>>();
 const panelStates = new Map<string, unknown>();
@@ -118,17 +119,17 @@ function openThread(event: MouseEvent) {
         <header class="workspace-page-head">
           <div class="workspace-page-identity">
             <span class="workspace-page-symbol"><component :is="navigationIcons[section.icon || section.id] || LayoutGrid" v-if="section" :size="22" /></span>
-            <div><p>{{ section?.label }}</p><h1>{{ view.label }}</h1></div>
+            <div><p v-if="!view.customPluginId">{{ section?.label }}</p><h1>{{ view.label }}</h1></div>
           </div>
           <div class="workspace-page-tools"><span id="workspace-connection-status"></span><span class="workspace-mobile-theme"><ThemePicker /></span><button class="workspace-back" type="button" aria-label="返回会话" title="返回会话" @click="open()"><MessagesSquare :size="15" /><span>返回会话</span></button></div>
-          <nav class="workspace-view-tabs" aria-label="工作面板视图"><button v-for="item in section?.items" :key="item.id" type="button" :aria-current="view.id === item.id ? 'page' : undefined" @click="open(item.id)">{{ item.label }}</button></nav>
+          <nav v-if="!view.customPluginId || (section?.items.length || 0) > 1" class="workspace-view-tabs" aria-label="工作面板视图"><button v-for="item in section?.items" :key="item.id" type="button" :aria-current="view.id === item.id ? 'page' : undefined" @click="open(item.id)">{{ item.label }}</button></nav>
           <div id="workspace-panel-toolbar"></div>
         </header>
         <WorkspacePanelViewport :key="view.id" :view-id="view.id">
           <div v-if="!pluginReady" class="plugin-unavailable"><h2>{{ view.label }}</h2><p>{{ integrations.query.isPending.value ? '正在读取插件状态…' : integrations.query.error.value?.message || '提供此功能的插件未启用、已移除或尚未配置。历史数据仍保留，接入后可继续使用原功能。' }}</p><el-button @click="router.push({ path: '/agent', query: { view: 'settings', settingsTab: 'plugins' } })">管理接入插件</el-button></div>
           <AgentAutomationPanel v-else-if="view.id === 'automation'" :scoped-jobs="[]" :daily-report-available="context.dailyReportAvailable" :daily-report-pending="context.dailyReportPending" :daily-report-for-date="context.dailyReportForDate" @generate-daily-report="context.generateDailyReport" @compose="compose" />
           <RequirementDevelopment v-else-if="view.id === 'design'" @open-run="openRun" />
-          <component :is="panel" v-else v-bind="'mode' in view ? { mode: view.mode } : {}" @open-run="openRun" />
+          <component :is="panel" v-else v-bind="view.customPluginId ? { dedicated: true } : 'mode' in view ? { mode: view.mode } : {}" @open-run="openRun" />
         </WorkspacePanelViewport>
       </section>
     </template>

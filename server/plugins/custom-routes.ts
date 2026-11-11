@@ -33,6 +33,7 @@ export function createCustomPluginRoutes(runtime: CustomPluginRuntime, jira: Plu
         if (action === 'jira-find') return send(200, await jira.find(id, url.searchParams.get('key') || ''));
       } else {
         const input = await io.body(request, 100_000);
+        if (id === 'navigation' && action === 'settings') return send(200, await runtime.saveNavigation(input));
         if (id === 'inspect') return send(200, await runtime.inspect(z.object({ directory: z.string() }).strict().parse(input).directory));
         if (id === 'install') return send(200, await runtime.install(input));
         if (action === 'change') return send(200, await runtime.change(id, input));

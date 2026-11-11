@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { navigationPreferencesSchema, type NavigationPreferences } from '../../shared/workspace-navigation.js';
 import { pluginManifestSchema, pluginIdSchema, capabilitySchema, pluginReference, pluginReferences,
   type CustomPluginInfo, type PluginCapability, type PluginRecord, type PluginResource, type CustomPluginManifest } from '../../shared/custom-plugins.js';
 import type { createWorkspaceTodos } from '../workspace-todos.js';
@@ -39,6 +40,7 @@ export async function createCustomPluginRuntime(directory: string, todos: Awaite
   const root = await fs.realpath(directory), stateFile = path.join(root, 'installed.json');
   const raw = await readJson(stateFile, { version: 1, plugins: [] });
   if (raw.version !== 1 || !Array.isArray(raw.plugins)) throw new Error('自定义插件安装记录损坏');
+  let navigation = navigationPreferencesSchema.parse(raw.navigation || {});
   const installed = new Map<string, Installed>(), errors = new Map<string, string>();
   // A broken package does not prevent unrelated registered packages from loading.
   for (const entry of raw.plugins) {
@@ -52,9 +54,9 @@ export async function createCustomPluginRuntime(directory: string, todos: Awaite
   const saveState = () => {
     if (errors.size && raw.plugins.some((entry: any) => !installedSchema.safeParse(entry).success)) {
       // Keep unreadable entries for explicit repair instead of silently deleting them.
-      return privateJson(stateFile, { version: 1, plugins: [...installed.values(), ...raw.plugins.filter((entry: any) => !installedSchema.safeParse(entry).success)] });
+      return privateJson(stateFile, { version: 1, navigation, plugins: [...installed.values(), ...raw.plugins.filter((entry: any) => !installedSchema.safeParse(entry).success)] });
     }
-    return privateJson(stateFile, { version: 1, plugins: [...installed.values()] });
+    return privateJson(stateFile, { version: 1, navigation, plugins: [...installed.values()] });
   };
   function info(id: string, active = true) {
     const entry = installed.get(pluginIdSchema.parse(id));
@@ -112,9 +114,15 @@ export async function createCustomPluginRuntime(directory: string, todos: Awaite
   }
   return {
     assertCapability, assertCommand, resource, resolveReference, records,
-    list(): { plugins: CustomPluginInfo[]; errors: { id: string; message: string }[] } {
-      return { plugins: [...installed.values()].filter(entry => !entry.removed).map(entry => structuredClone({ ...entry, error: errors.get(entry.manifest.id) })), errors: [...errors].map(([id, message]) => ({ id, message })) };
+    list(): { navigation: NavigationPreferences; plugins: CustomPluginInfo[]; errors: { id: string; message: string }[] } {
+      return { navigation: structuredClone(navigation), plugins: [...installed.values()].filter(entry => !entry.removed).map(entry => structuredClone({ ...entry, error: errors.get(entry.manifest.id) })), errors: [...errors].map(([id, message]) => ({ id, message })) };
     },
+    saveNavigation(raw: unknown) { return serial(async () => {
+      const next = navigationPreferencesSchema.parse(raw), previous = navigation;
+      navigation = next;
+      try { await saveState(); } catch (error) { navigation = previous; throw error; }
+      return this.list();
+    }); },
     inspect: inspectCustomPlugin,
     install(raw: unknown) { return serial(async () => {
       const input = z.object({ directory: z.string(), digest: z.string(), grants: z.array(capabilitySchema), confirmed: z.literal(true), showInMenu: z.boolean().optional() }).strict().parse(raw);

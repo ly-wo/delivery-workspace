@@ -54,3 +54,15 @@ test('custom plugin menus use independent identities while preserving existing r
   assert.equal(workspaceView('plugins', [{ ...note, enabled: false }], note.manifest.id)?.id, 'plugins');
   assert.equal(registeredWorkspaceSections([], plugins).flatMap(section => section.items).filter(item => item.id === 'plugins').length, 1);
 });
+
+test('menu preferences order both built-in and plugin menus without losing new or hidden entries', async () => {
+  const { applyNavigationPreferences } = await import('../src/pages/agent/workspace-navigation');
+  const sections = [{ id: 'today', label: '今日', items: [] }, { id: 'custom:notes', label: '笔记', icon: 'plugins', items: [] }, { id: 'projects', label: '项目', items: [] }];
+  const preferences = { order: ['custom:notes', 'unavailable', 'today'], icons: { 'custom:notes': 'notebook' as const } };
+  const ordered = applyNavigationPreferences(sections, preferences);
+  assert.deepEqual(ordered.map(s => s.id), ['custom:notes', 'today', 'projects']);
+  assert.equal(ordered[0].icon, 'notebook');
+  assert.equal(sections[1].icon, 'plugins');
+  const restored = applyNavigationPreferences([...sections, { id: 'unavailable', label: '恢复', items: [] }], preferences);
+  assert.deepEqual(restored.map(s => s.id), ['custom:notes', 'unavailable', 'today', 'projects']);
+});
