@@ -89,3 +89,7 @@ curl -fsS http://127.0.0.1:5199/api/health
 主要开发验证在 macOS；原生目录选择器、Terminal.app 和桌面会话协作属于 macOS 接入，其他系统可手动输入工作区路径。Linux 使用端口检测和启动服务时需要安装 `lsof` 和 `zsh`。完整功能还取决于接收方 CLI/MCP 版本及外部账号权限。
 
 Jira 与 Confluence 的导航、知识来源和需求扩展由插件接入，启停即时生效。参见 [功能插件装配与迁移](docs/integration-plugin-ui.md)。
+
+## Go 实训插件
+
+Go 实训工坊以本机接入插件提供七天课程、代码编辑、运行测试和 HTTP 调试。在设置的接入插件中启停，无需远端凭据；详见 [插件说明](plugins/go-learning/README.md)。

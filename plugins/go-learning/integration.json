@@ -1,0 +1,13 @@
+{
+  "id": "go-learning",
+  "kind": "local",
+  "name": "Go 实训工坊",
+  "description": "7 天 Go 课程、学习进度、代码编辑、运行测试与 HTTP 调试；使用本机 Go 工具链，无需远端凭据。",
+  "capabilities": ["learning.go.read", "learning.go.practice"],
+  "prefix": "GO_LEARNING",
+  "section": { "id": "learning", "label": "Go 实训", "shortLabel": "Go 实训", "icon": "code" },
+  "views": [{ "id": "go-studio", "label": "Go 实训工坊", "path": "/go-studio", "section": "learning", "component": "studio" }],
+  "sourceKeys": [],
+  "apiPrefixes": ["/api/go-learning/"],
+  "apiPaths": []
+}

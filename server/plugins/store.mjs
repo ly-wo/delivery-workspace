@@ -24,9 +24,9 @@ function site(value) {
   return url.href.replace(/\/+$/, '');
 }
 function validate(id, input) {
-  definition(id);
+  const local = definition(id).kind === 'local';
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('插件配置格式无效');
-  const fields = id === 'wecom' ? ['enabled', 'installed', 'groupName', 'webhook'] : ['enabled', 'installed', 'baseUrl', 'username', 'token'];
+  const fields = local ? ['enabled', 'installed'] : id === 'wecom' ? ['enabled', 'installed', 'groupName', 'webhook'] : ['enabled', 'installed', 'baseUrl', 'username', 'token'];
   if (Object.keys(input).some(key => !fields.includes(key))) throw new Error('插件配置包含不支持的字段');
   if (typeof input.enabled !== 'boolean') throw new Error('请选择插件启用状态');
   if (input.installed !== undefined && typeof input.installed !== 'boolean') throw new Error('插件安装状态无效');
@@ -72,17 +72,19 @@ export async function createPluginStore({ file = pluginFile(), env = process.env
     return pluginDefinitions.map(plugin => {
       const saved = data.plugins[plugin.id];
       const enabled = saved?.enabled ?? env[`DELIVERY_PLUGIN_${plugin.prefix}_ENABLED`] !== 'false';
+      const local = plugin.kind === 'local';
       const legacy = plugin.id === 'wecom' ? wecomConfig() : {};
-      const runningConfigured = plugin.id === 'wecom' ? Boolean(env.DELIVERY_PLUGIN_WECOM_WEBHOOK || legacy.hasWebhook) : Boolean(env[`${plugin.prefix}_BASE_URL`] && (env[`${plugin.prefix}_AUTH_HEADER`] || env[`${plugin.prefix}_COOKIE`] || env[`${plugin.prefix}_KEYCHAIN_SERVICE`] || env[`${plugin.prefix}_USERNAME`] && env[`${plugin.prefix}_API_TOKEN`]));
+      const runningConfigured = local ? true : plugin.id === 'wecom' ? Boolean(env.DELIVERY_PLUGIN_WECOM_WEBHOOK || legacy.hasWebhook) : Boolean(env[`${plugin.prefix}_BASE_URL`] && (env[`${plugin.prefix}_AUTH_HEADER`] || env[`${plugin.prefix}_COOKIE`] || env[`${plugin.prefix}_KEYCHAIN_SERVICE`] || env[`${plugin.prefix}_USERNAME`] && env[`${plugin.prefix}_API_TOKEN`]));
       return { ...plugin, enabled, installed: saved?.installed !== false, runningEnabled: env[`DELIVERY_PLUGIN_${plugin.prefix}_ENABLED`] !== 'false' && env[`DELIVERY_PLUGIN_${plugin.prefix}_INSTALLED`] !== 'false', runningConfigured, baseUrl: saved?.baseUrl ?? env[`${plugin.prefix}_BASE_URL`] ?? '',
         username: saved?.username ?? env[`${plugin.prefix}_USERNAME`] ?? '', groupName: saved?.groupName ?? legacy.groupName ?? '',
-        configured: saved?.baseUrl ? Boolean(saved.token) : plugin.id === 'wecom' ? Boolean(saved?.webhook || legacy.hasWebhook) : Boolean(env[`${plugin.prefix}_AUTH_HEADER`] || env[`${plugin.prefix}_COOKIE`] || env[`${plugin.prefix}_KEYCHAIN_SERVICE`] || env[`${plugin.prefix}_USERNAME`] && env[`${plugin.prefix}_API_TOKEN`]),
+        configured: local ? true : saved?.baseUrl ? Boolean(saved.token) : plugin.id === 'wecom' ? Boolean(saved?.webhook || legacy.hasWebhook) : Boolean(env[`${plugin.prefix}_AUTH_HEADER`] || env[`${plugin.prefix}_COOKIE`] || env[`${plugin.prefix}_KEYCHAIN_SERVICE`] || env[`${plugin.prefix}_USERNAME`] && env[`${plugin.prefix}_API_TOKEN`]),
         restartRequired: connection(saved) !== connection(startup.plugins[plugin.id]),
-        source: saved ? 'plugin' : 'legacy' };
+        source: local ? 'bundled' : saved ? 'plugin' : 'legacy' };
     });
   }
   async function candidate(id, input) {
     const next = validate(id, input), current = (await readPluginFile(file)).plugins[id];
+    if (definition(id).kind === 'local') return { ...current, ...next };
     // Saving an unchanged legacy connection must not replace its credential source with an empty token.
     const prefix = definition(id).prefix;
     if (id !== 'wecom' && !current?.baseUrl && !next.token && next.baseUrl
@@ -124,12 +126,13 @@ export async function createPluginStore({ file = pluginFile(), env = process.env
         finally { await fs.rm(temp, { force: true }); }
         env[`DELIVERY_PLUGIN_${definition(id).prefix}_ENABLED`] = String(next.enabled);
         env[`DELIVERY_PLUGIN_${definition(id).prefix}_INSTALLED`] = String(next.installed !== false);
-        return { plugins: await list(), message: '启停状态已生效；连接变更请在任务结束后重启工作台生效' };
+        return { plugins: await list(), message: definition(id).kind === 'local' ? '本地插件状态已生效，学习记录与练习工程已保留' : '启停状态已生效；连接变更请在任务结束后重启工作台生效' };
       });
       queue = result.catch(() => {}); return result;
     },
     async test(id, input) {
       const plugin = definition(id), config = await candidate(id, input);
+      if (plugin.kind === 'local') return { message: '本地插件无需远端连接；请在实训页面检查 Go 工具链，未执行课程代码' };
       if (id === 'wecom') {
         if (!config.webhook) throw new Error('请先填写 Webhook');
         return { message: 'Webhook 格式检查通过，未发送消息；实际送达请在消息页预览并确认发送' };

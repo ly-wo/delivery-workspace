@@ -2,7 +2,8 @@
 import jira from '../../plugins/jira/integration.json' with { type: 'json' };
 import confluence from '../../plugins/confluence/integration.json' with { type: 'json' };
 import wecom from '../../plugins/wecom/integration.json' with { type: 'json' };
-export const pluginDefinitions = [jira, confluence, wecom];
+import goLearning from '../../plugins/go-learning/integration.json' with { type: 'json' };
+export const pluginDefinitions = [jira, confluence, wecom, goLearning];
 export function definition(id) {
   const plugin = pluginDefinitions.find(item => item.id === id);
   if (!plugin) throw new Error('未注册的接入插件');
