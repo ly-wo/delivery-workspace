@@ -8,6 +8,9 @@ import { agentWorkspaceContext } from '../../shared/agent-workspace-context';
 import type { CustomPluginInfo, PluginRecord } from '../../../shared/custom-plugins';
 import PageHeading from '../../shared/ui/PageHeading.vue';
 defineProps<{ dedicated?: boolean }>();
+import PluginApplicationFrame from './PluginApplicationFrame.vue';
+const applicationFrame = ref<InstanceType<typeof PluginApplicationFrame>>();
+async function refreshWorkspace() { if (plugin.value?.manifest.page.kind === 'application') await applicationFrame.value?.reload(); else await run(load); }
 import PluginJiraDialog from './PluginJiraDialog.vue';
 const integrations = useIntegrationPlugins();
 const route = useRoute(), router = useRouter(), workspace = inject(agentWorkspaceContext, undefined);
@@ -20,7 +23,7 @@ const statusField = computed(() => plugin.value?.manifest.records.fields.find(f 
 const filtered = computed(() => items.value.filter(item => (!status.value || item.values.status === status.value) && Object.values(item.values).join(' ').toLowerCase().includes(query.value.toLowerCase())));
 async function run(work: () => Promise<void>) { busy.value = true; error.value = ''; try { await work(); } catch (e) { error.value = e instanceof Error ? e.message : '插件操作失败'; } finally { busy.value = false; } }
 async function load() { plugins.value = (await pluginRequest()).plugins; items.value = []; detail.value = undefined; selected.value = undefined; editing.value = false;
-  if (plugin.value?.enabled) { items.value = (await pluginRequest(`${id.value}/records`)).items; const record = items.value.find(item => item.id === route.query.record); if (record) await select(record); else if (route.query.record) error.value = '事项已删除或不存在，历史会话中的快照仍可查看'; }
+  if (plugin.value?.enabled && plugin.value.manifest.page.kind !== 'application') { items.value = (await pluginRequest(`${id.value}/records`)).items; const record = items.value.find(item => item.id === route.query.record); if (record) await select(record); else if (route.query.record) error.value = '事项已删除或不存在，历史会话中的快照仍可查看'; }
 }
 async function select(record: PluginRecord & { version: string }) { selected.value = record; editing.value = true; form.value = { ...record.values }; detail.value = await pluginRequest(`${id.value}/record?id=${record.id}`); }
 function add() { selected.value = undefined; detail.value = undefined; form.value = Object.fromEntries((plugin.value?.manifest.records.fields || []).map(field => [field.key, field.default])); editing.value = true; }
@@ -42,10 +45,11 @@ onMounted(() => run(load));
 </script>
 <template>
   <div class="plugin-workspace">
-    <PageHeading title="功能插件" description="" :loading="busy" @refresh="run(load)"><el-button @click="router.push({ query: { view: 'settings', settingsTab: 'plugins' } })">管理插件</el-button></PageHeading>
+    <PageHeading title="功能插件" description="" :loading="busy" @refresh="refreshWorkspace"><el-button @click="router.push({ query: { view: 'settings', settingsTab: 'plugins' } })">管理插件</el-button></PageHeading>
     <div v-if="!dedicated" class="toolbar"><el-select :model-value="id" placeholder="选择功能插件" @change="router.push({ query: { view: 'plugins', plugin: $event } })"><el-option v-for="p in plugins" :key="p.manifest.id" :value="p.manifest.id" :label="p.manifest.name + (p.enabled ? '' : '（已停用）')" /></el-select></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-empty v-if="!plugin || !plugin.enabled" :description="id ? '插件已停用或移除，历史引用快照仍保留在会话中' : '请先在设置中添加插件，再选择要打开的功能'" />
+    <PluginApplicationFrame v-else-if="plugin.manifest.page.kind === 'application'" ref="applicationFrame" :key="plugin.manifest.id" :plugin-id="plugin.manifest.id" />
     <template v-else>
       <h2 v-if="!dedicated">{{ plugin.manifest.page.title }}</h2><p>{{ plugin.manifest.description }}</p>
       <div class="toolbar plugin-record-filters"><el-input v-model="query" placeholder="搜索事项" clearable /><el-select v-if="statusField" v-model="status" placeholder="全部状态" clearable><el-option v-for="o in statusField.options" :key="o.value" :label="o.label" :value="o.value" /></el-select><el-button type="primary" :disabled="!writable || busy" @click="add">新增事项</el-button></div>

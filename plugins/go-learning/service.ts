@@ -68,6 +68,9 @@ async function isTaskManagerListening() {
   }
 }
 
+const activeGoProcesses = new Set<() => void>();
+export function stopGoLearningProcesses() { for (const stop of activeGoProcesses) stop(); }
+
 function runGoProcess(binary: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; httpPreview: boolean }) {
   return new Promise<{ exitCode: number; stdout: string; stderr: string; httpStarted: boolean }>(resolve => {
     const child = spawn(binary, args, { cwd: options.cwd, env: options.env, shell: false,
@@ -81,6 +84,7 @@ function runGoProcess(binary: string, args: string[], options: { cwd: string; en
         else process.kill(-child.pid, 'SIGKILL');
       } catch { /* The process already exited. */ }
     };
+    activeGoProcesses.add(stop);
     const timeout = setTimeout(() => { failure = 'Go 命令运行超时'; stop(); }, 45_000);
     child.stdout.setEncoding('utf8').on('data', (text: string) => {
       stdout += text;
@@ -96,6 +100,7 @@ function runGoProcess(binary: string, args: string[], options: { cwd: string; en
     child.on('error', error => { failure = error.message; });
     child.on('exit', stop);
     child.on('close', code => {
+      activeGoProcesses.delete(stop);
       clearTimeout(timeout);
       clearTimeout(preview);
       resolve({ exitCode: failure ? 1 : httpStarted ? 0 : code ?? 1, stdout: stdout.trimEnd(),

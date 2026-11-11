@@ -10,17 +10,17 @@ const router = useRouter(), directory = ref(''), busy = ref(false), data = ref<{
 const queryClient = useQueryClient(), showInMenu = ref(false);
 const grantTarget = ref<CustomPluginInfo>(), selectedGrants = ref<PluginCapability[]>([]);
 const inspected = ref<{ manifest: CustomPluginManifest; source: string; digest: string }>(), grants = ref<PluginCapability[]>([]);
-const labels: Record<PluginCapability, string> = { 'storage.read': '读取插件私有数据', 'storage.write': '修改插件私有数据', 'workspace.todos.read': '读取个人待办', 'workspace.todos.write': '修改个人待办', 'jira.read': '读取 Jira 项目和任务', 'jira.create': '经确认创建 Jira 任务', 'conversation.context': '提供会话上下文' };
+const labels: Record<PluginCapability, string> = { 'storage.read': '读取插件私有数据', 'storage.write': '修改插件私有数据', 'workspace.todos.read': '读取个人待办', 'workspace.todos.write': '修改个人待办', 'jira.read': '读取 Jira 项目和任务', 'jira.create': '经确认创建 Jira 任务', 'conversation.context': '提供会话上下文', 'application.local': '信任并运行本机代码（当前用户权限，非系统沙箱）', 'conversation.compose': '将内容填入会话草稿（不自动发送）', 'workspace.open': '打开插件目录的终端或编辑器' };
 async function load() { data.value = await pluginRequest(); queryClient.setQueryData(customPluginsQueryKey, data.value); }
 async function run(work: () => Promise<void>) { busy.value = true; try { await work(); } catch (e) { ElMessage.error(e instanceof Error ? e.message : '插件操作失败'); } finally { busy.value = false; } }
-async function inspect() { inspected.value = undefined; showInMenu.value = false; await run(async () => { inspected.value = await pluginRequest('inspect', { directory: directory.value.trim() }); grants.value = [...inspected.value!.manifest.permissions]; }); }
-async function install() { if (!inspected.value) return; await run(async () => { await pluginRequest('install', { directory: inspected.value!.source, digest: inspected.value!.digest, grants: grants.value, confirmed: true, showInMenu: showInMenu.value }); inspected.value = undefined; await load(); ElMessage.success('插件已添加并生效'); }); }
+async function inspect() { inspected.value = undefined; showInMenu.value = false; await run(async () => { inspected.value = await pluginRequest('inspect', { directory: directory.value.trim() }); grants.value = inspected.value!.manifest.permissions.filter(p => p !== 'application.local'); }); }
+async function install() { if (!inspected.value) return; await run(async () => { await pluginRequest('install', { directory: inspected.value!.source, digest: inspected.value!.digest, grants: grants.value, confirmed: true, showInMenu: showInMenu.value, ...(grants.value.includes('application.local') ? {trustedLocalCode: true} : {}) }); inspected.value = undefined; await load(); ElMessage.success('插件已添加并生效'); }); }
 async function change(plugin: CustomPluginInfo, remove = false) {
   if (remove) { try { await ElMessageBox.confirm('移除插件入口并停用其能力，保留业务数据和历史引用。', '移除插件', { type: 'warning' }); } catch { return; } }
   await run(async () => { await pluginRequest(`${plugin.manifest.id}/change`, remove ? { remove: true } : { enabled: !plugin.enabled }); await load(); });
 }
 async function changeMenu(plugin: CustomPluginInfo, value: boolean) { await run(async () => { await pluginRequest(`${plugin.manifest.id}/change`, { showInMenu: value }); await load(); }); }
-async function saveGrants() { if (!grantTarget.value) return; await run(async () => { await pluginRequest(`${grantTarget.value!.manifest.id}/change`, { grants: selectedGrants.value }); grantTarget.value = undefined; await load(); }); }
+async function saveGrants() { if (!grantTarget.value) return; await run(async () => { await pluginRequest(`${grantTarget.value!.manifest.id}/change`, { grants: selectedGrants.value, ...(selectedGrants.value.includes('application.local') ? {trustedLocalCode: true} : {}) }); grantTarget.value = undefined; await load(); }); }
 onMounted(() => run(load));
 </script>
 <template>
@@ -32,7 +32,7 @@ onMounted(() => run(load));
       <p class="examples">内附示例：<el-button v-for="example in data.examples" :key="example.directory" link type="primary" @click="directory = example.directory; inspect()">{{ example.name }}</el-button></p>
       <div v-if="inspected" class="package-preview">
         <h3>{{ inspected.manifest.name }} · {{ inspected.manifest.version }}</h3><p>{{ inspected.manifest.description }}</p><p>来源：{{ inspected.source }}</p>
-        <p>选择允许使用的宿主能力。未授权的能力会被拒绝；Jira 写入仍需每次预览确认。</p>
+        <el-alert v-if="inspected.manifest.application" title="应用插件包含可执行代码。只添加你信任的插件；本机代码可访问当前用户的文件与网络，独立进程不等于安全沙箱。" type="warning" :closable="false" /><p>选择允许使用的宿主能力。未授权的能力会被拒绝；Jira 写入仍需每次预览确认。</p>
         <el-checkbox-group v-model="grants"><el-checkbox v-for="permission in inspected.manifest.permissions" :key="permission" :value="permission">{{ labels[permission] }}</el-checkbox></el-checkbox-group>
         <div class="menu-setting"><el-checkbox v-model="showInMenu" :disabled="busy">在主菜单显示</el-checkbox></div>
         <el-button type="primary" :disabled="busy" @click="install">确认授权并添加</el-button><el-button @click="inspected = undefined">取消</el-button>

@@ -6,7 +6,7 @@ import { ElMessage } from 'element-plus';
 import { Plug, ListChecks, BookOpen, MessageSquare } from '@lucide/vue';
 import StatusPill from '../../shared/ui/StatusPill.vue';
 interface Plugin {
-  id: string; kind?: 'local'; name: string; description: string; enabled: boolean; baseUrl: string; username: string;
+  id: string; name: string; description: string; enabled: boolean; baseUrl: string; username: string;
   installed: boolean; runningEnabled: boolean; runningConfigured: boolean; views: {id: string; label: string}[]; groupName: string; configured: boolean; restartRequired: boolean; source: string; token?: string; webhook?: string;
 }
 const client = useQueryClient(), router = useRouter();
@@ -71,7 +71,7 @@ onMounted(load);
 <template>
   <section class="surface integration-plugins" aria-label="服务接入插件" :aria-busy="busy">
     <div class="surface-header">
-      <div><h2>服务接入</h2><p>管理本机功能、业务服务连接与插件入口，启停立即生效。</p></div>
+      <div><h2>服务接入</h2><p>管理业务服务的连接与功能入口，启停立即生效。</p></div>
       <el-button :loading="busy" @click="load">刷新</el-button>
     </div>
     <div v-if="error" class="plugin-feedback" role="alert">{{ error }} <el-button @click="load">重试</el-button></div>
@@ -82,7 +82,7 @@ onMounted(load);
         <div class="plugin-info">
           <div class="plugin-title"><h3>{{ plugin.name }}</h3><StatusPill v-bind="status(plugin)" /></div>
           <p>{{ plugin.description }}</p>
-          <p class="plugin-meta">{{ plugin.kind === 'local' ? '本机功能 · 无需连接凭据' : (plugin.configured ? '已配置凭据' : '尚未配置凭据') + ' · ' + (plugin.source === 'legacy' ? '沿用本机配置' : '插件管理') }}</p>
+          <p class="plugin-meta">{{ plugin.configured ? '已配置凭据' : '尚未配置凭据' }} · {{ plugin.source === 'legacy' ? '沿用本机配置' : '插件管理' }}</p>
           <p v-if="!plugin.installed" class="plugin-meta">配置和历史数据已保留，可随时恢复接入。</p>
           <p v-else-if="plugin.restartRequired" class="plugin-meta">连接配置已保存，请在任务结束后重启工作台。</p>
           <div v-if="plugin.installed && plugin.runningEnabled && plugin.runningConfigured && plugin.views.length" class="plugin-links">
@@ -90,7 +90,7 @@ onMounted(load);
           </div>
         </div>
         <div class="plugin-actions">
-          <el-button v-if="plugin.kind !== 'local'" type="primary" plain :disabled="busy" :aria-label="`配置 ${plugin.name}`" @click="edit(plugin)">配置连接</el-button>
+          <el-button type="primary" plain :disabled="busy" :aria-label="`配置 ${plugin.name}`" @click="edit(plugin)">配置连接</el-button>
           <el-button v-if="!plugin.installed" :disabled="busy" @click="change(plugin, {installed: true, enabled: true})">恢复接入</el-button>
           <template v-else>
             <el-button :disabled="busy" @click="change(plugin, {enabled: !plugin.runningEnabled})">{{ plugin.runningEnabled ? '停用' : '启用' }}</el-button>

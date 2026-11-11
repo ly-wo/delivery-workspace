@@ -1,6 +1,6 @@
 import { z } from 'zod';
 export const pluginIdSchema = z.string().regex(/^[a-z][a-z0-9-]{1,63}$/);
-export const capabilitySchema = z.enum(['storage.read', 'storage.write', 'workspace.todos.read', 'workspace.todos.write', 'jira.read', 'jira.create', 'conversation.context']);
+export const capabilitySchema = z.enum(['storage.read', 'storage.write', 'workspace.todos.read', 'workspace.todos.write', 'jira.read', 'jira.create', 'conversation.context', 'application.local', 'conversation.compose', 'workspace.open']);
 export const pluginFieldSchema = z.object({
   key: z.string().regex(/^[a-z][a-zA-Z0-9]{0,39}$/).refine(key => !['id', 'createdAt', 'updatedAt', '__proto__', 'constructor', 'prototype'].includes(key)),
   label: z.string().min(1).max(80), type: z.enum(['text', 'textarea', 'date', 'select']), required: z.boolean().default(false),
@@ -9,15 +9,19 @@ export const pluginFieldSchema = z.object({
 }).strict().refine(field => field.type !== 'select' || !!field.options?.length, '选择字段必须声明选项');
 export const pluginManifestSchema = z.object({
   apiVersion: z.literal(1), id: pluginIdSchema, name: z.string().min(1).max(80), version: z.string().regex(/^\d+\.\d+\.\d+$/),
-  hostApi: z.literal(1), description: z.string().max(1000),
-  permissions: z.array(capabilitySchema).max(7),
-  page: z.object({ title: z.string().min(1).max(80), kind: z.literal('records') }).strict(),
+  hostApi: z.union([z.literal(1), z.literal(2)]), description: z.string().max(1000),
+  permissions: z.array(capabilitySchema).max(10),
+  page: z.object({ title: z.string().min(1).max(80), kind: z.enum(['records', 'application']) }).strict(),
+  application: z.object({ frontend: z.literal('ui.js'), styles: z.literal('ui.css'), backend: z.literal('server.mjs') }).strict().optional(),
   records: z.object({ storage: z.enum(['private', 'workspace.todos']), resourceType: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
     fields: z.array(pluginFieldSchema).min(1).max(15), }).strict(),
   commands: z.array(z.object({ id: z.string().regex(/^[a-z][a-z0-9-]*$/), label: z.string().min(1).max(80),
     action: z.enum(['jira.link', 'jira.create', 'conversation.context']) }).strict()).max(10).default([]),
 }).strict().superRefine((m, ctx) => {
   const error = (message: string) => ctx.addIssue({ code: 'custom', message });
+  if (m.page.kind === 'application') {
+    if (m.hostApi !== 2 || !m.application || !m.permissions.includes('application.local') || m.records.storage !== 'private') error('应用插件需要 hostApi 2、应用入口、本机执行声明和私有存储');
+  } else if (m.hostApi !== 1 || m.application || m.permissions.includes('application.local')) error('记录插件使用 hostApi 1 且不支持可执行入口');
   if (new Set(m.permissions).size !== m.permissions.length || new Set(m.records.fields.map(f => f.key)).size !== m.records.fields.length || new Set(m.commands.map(c => c.id)).size !== m.commands.length) error('标识或权限不能重复');
   if (new Set(m.records.fields.map(f => f.label)).size !== m.records.fields.length) error('字段名称不能重复，以免引用内容丢失');
   if (!m.records.fields.some(f => f.key === 'title' && f.required && f.type === 'text')) error('必须包含必填文本 title 字段');

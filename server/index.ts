@@ -1,3 +1,4 @@
+import { createPluginApplications } from './plugins/applications.js';
 import { createCustomPluginRuntime } from './plugins/custom-runtime.js';
 import { createPluginJira } from './plugins/host-jira.js';
 import { createCustomPluginRoutes } from './plugins/custom-routes.js';
@@ -34,7 +35,7 @@ import { createAgentAttachmentStore } from './agent-attachments.js';
 import { isAgentImageAttachment, maxAgentAttachmentBytes } from '../shared/agent-runtime.js';
 import { listCodexSkills } from './codex-skills.js';
 import { createWorkspacePickerRoute } from './workspace-picker.js';
-import { createWorkspaceAppRoute, createWorkspaceTerminalRoute, openWorkspaceCursor } from './workspace-terminal.js';
+import { createWorkspaceAppRoute, createWorkspaceTerminalRoute, openWorkspaceTerminal, openWorkspaceCursor } from './workspace-terminal.js';
 import { createIntegrationStore } from './api-integration.js';
 import { loadIntegrationCatalog } from './integration-catalog.js';
 import { createApexBffReviewStore } from './apex-bff-review.js';
@@ -130,7 +131,7 @@ const designExecutor = await createDesignExecutor(path.join(dataDirectory, 'desi
 const cliQueue = await createCliQueue(dataDirectory);
 const agentAttachments = await createAgentAttachmentStore(path.join(dataDirectory, 'agent-runtimes', 'attachments'));
 const agentNotes = await createAgentNoteStore(path.join(dataDirectory, 'agent-notes'));
-const integrationRuntime = createIntegrationRuntime({directory: dataDirectory, rootDirectory: root, source: sourceBackend, port, json, body});
+const integrationRuntime = createIntegrationRuntime({directory: dataDirectory, source: sourceBackend, port, json, body});
 const systemCatalog = await createSystemCatalog(path.join(dataDirectory, 'system-catalog'), sourceBackend.confluenceReadRequest, undefined, sourceBackend.readLocalProjects);
 const systemCatalogRoutes = createSystemCatalogRoutes(systemCatalog, { json, body, port });
 const interfaceCenter = await createInterfaceCenter(path.join(dataDirectory, 'interface-center'));
@@ -156,8 +157,9 @@ const agentRuntimes = await createAgentRuntimeService(path.join(dataDirectory, '
   resolveAttachments: agentAttachments.resolve,
   removeAttachments: agentAttachments.remove,
 });
-const customPluginRoutes = createCustomPluginRoutes(customPlugins, pluginJira, { json, body, port,
-  examples: [{ name: '待办事项', directory: path.join(root, 'plugins/todos') }, { name: '项目备忘示例', directory: path.join(root, 'plugins/example-notes') }],
+const pluginApplications = createPluginApplications(customPlugins, (app, directory) => app === 'terminal' ? openWorkspaceTerminal(directory) : openWorkspaceCursor(directory, path.join(dataDirectory, 'cursor-workspaces')));
+const customPluginRoutes = createCustomPluginRoutes(customPlugins, pluginJira, { json, body, port, applications: pluginApplications,
+  examples: [{ name: '待办事项', directory: path.join(root, 'plugins/todos') }, { name: '项目备忘示例', directory: path.join(root, 'plugins/example-notes') }, { name: 'Go 实训工坊（本机应用）', directory: path.join(root, 'plugins/go-learning/package') }],
   citations: reference => agentRuntimes.knowledgeCitations(reference),
 });
 const desktopAccounts = createDesktopAccountsService();
@@ -1150,7 +1152,7 @@ function shutdown() {
   await remoteDelivery.close();
   await systemCatalog.close();
   await interfaceCenter.close();
-  server.close(); await pluginJira.close(); await customPlugins.close(); await workspaceReports.close(); await groupChat?.close(); await refactorControl.close(workspaceRestart.isRestarting()); await refactorWorkspace.close(); await agentTeams?.close(); await teamGovernance.close(); sourceBackend.close(); await Promise.all(Object.values(accountServices).map(accounts => accounts.close())); await stopStateBackup(); await Promise.all([requirementDevelopment.close(), deliveryAcceptance.close(), jiraFix.close(), jiraFixHandoff.close(), jiraDev.close()]); await Promise.all([cliQueue.close(), agentRuntimes.close(), designExecutor.close(), integration.close(), integrationRuntime.close(), apexBffReview.close(), wecomIntegration.close(), reportBot.close(), deployments.close(), yunxiaoDeployments.close()]); await vite?.close(); await agentUsage.close(); await service.close(); await stateBackup.close(); await releaseStateLease(); process.exit(0);
+  server.close(); await pluginApplications.close(); await pluginJira.close(); await customPlugins.close(); await workspaceReports.close(); await groupChat?.close(); await refactorControl.close(workspaceRestart.isRestarting()); await refactorWorkspace.close(); await agentTeams?.close(); await teamGovernance.close(); sourceBackend.close(); await Promise.all(Object.values(accountServices).map(accounts => accounts.close())); await stopStateBackup(); await Promise.all([requirementDevelopment.close(), deliveryAcceptance.close(), jiraFix.close(), jiraFixHandoff.close(), jiraDev.close()]); await Promise.all([cliQueue.close(), agentRuntimes.close(), designExecutor.close(), integration.close(), integrationRuntime.close(), apexBffReview.close(), wecomIntegration.close(), reportBot.close(), deployments.close(), yunxiaoDeployments.close()]); await vite?.close(); await agentUsage.close(); await service.close(); await stateBackup.close(); await releaseStateLease(); process.exit(0);
   })();
 }
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { void shutdown(); });

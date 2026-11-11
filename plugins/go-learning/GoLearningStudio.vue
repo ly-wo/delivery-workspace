@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
   BookOpen,
   Bot,
@@ -33,12 +33,12 @@ import type {
   GoLearningOverview,
   GoSandboxFile,
 } from './types';
-import { agentWorkspaceContext } from '../../src/shared/agent-workspace-context';
-import PageHeading from '../../src/shared/ui/PageHeading.vue';
-import AgentMarkdown from '../../src/features/agent-workbench/AgentMarkdown.vue';
+import { pluginFetch as fetch, host } from './bridge';
+import PageHeading from './PageHeading.vue';
+import AgentMarkdown from './markdown/AgentMarkdown.vue';
 import { FALLBACK_DAYS, loadLocalFallbackOverview, saveLocalFallbackProgress } from './fallback-data';
 
-const workspace = inject(agentWorkspaceContext, undefined);
+const workspace = host;
 
 const overview = ref<GoLearningOverview | null>(null);
 const loading = ref(false);
@@ -434,13 +434,7 @@ async function openExternalApp(app: 'terminal' | 'cursor') {
   const sandboxPath = overview.value?.sandboxPath;
   if (!sandboxPath) return;
   try {
-    const res = await fetch(`/api/workspace/${app}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspacePath: sandboxPath }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || '打开失败');
+    const data = await host.openWorkspace(app, sandboxPath);
     ElMessage.success(data.message || '已打开');
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '打开应用失败');
@@ -449,7 +443,7 @@ async function openExternalApp(app: 'terminal' | 'cursor') {
 
 async function copyText(text: string, label = '代码') {
   try {
-    await navigator.clipboard.writeText(text);
+    await host.copy(text);
     ElMessage.success(`已复制${label}到剪贴板`);
   } catch {
     ElMessage.warning('复制失败，请手动选择复制');
@@ -778,7 +772,7 @@ async function askAgentTutor(mode: 'diagnose' | 'review' | 'quiz') {
   }
 }
 
-function sendToAgentStudio() {
+async function sendToAgentStudio() {
   if (!workspace || !overview.value || !currentDay.value) {
     ElMessage.warning('当前不在 Agent 联动上下文中');
     return;
@@ -810,7 +804,7 @@ function sendToAgentStudio() {
   }
 
   showTutorDrawer.value = false;
-  workspace.compose(prompt, sandboxPath);
+  try { await workspace.compose(prompt, sandboxPath); } catch (error) { ElMessage.error(error instanceof Error ? error.message : '未能填入会话草稿'); }
 }
 
 watch(

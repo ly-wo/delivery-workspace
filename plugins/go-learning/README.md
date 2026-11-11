@@ -1,46 +1,50 @@
-# Go 实训工坊插件
+# Go 实训工坊：自定义应用插件
 
-在 `codex/integration-plugins` 分支引入 main 的 Go 实训实现（790dac0），作为随工作台源码发布的受信任本机插件接入。七天课程、检查清单、练习、笔记、代码编辑、快照、运行、单元测试、竞态检测、格式化、HTTP 调试和助教入口继续使用原实现。真实执行、模拟输出与保存失败的展示逻辑保持不变。
+在 `codex/integration-plugins` 分支将 main（790dac0）的完整 Go 实训改为独立应用包。课程、编辑器、快照、代码执行、测试、HTTP 调试、笔记与进度都由本包实现。工作台仅提供通用安装授权、菜单、应用加载、专属目录、会话草稿和打开本机应用接口，不再注册 Go 接入插件或 `/api/go-learning` 业务路由。
 
-## 使用
+## 添加到工作台
 
-构建并重启新版工作台后，在「设置 → 接入插件」找到「Go 实训工坊」。本机插件无需地址、用户名或 Token；默认启用以兼容原入口。菜单、页面和 API 全部由插件注册。停用/移除即时阻止后端新调用，前端在插件状态刷新时隐藏菜单；管理页操作会立即刷新当前窗口状态。旧页面显示恢复指引，不把停用解释成离线模拟模式。
+宿主升级并重启一次后，进入「设置 → 接入插件 → 自定义功能插件」，选择“Go 实训工坊（本机应用）”示例（指向本目录下的 `package`），检查来源与权限，明确勾选本机代码信任和菜单后添加。以后添加同协议的其他应用无需重启工作台。
 
-旧链接 `/go-studio` 和 `/agent?view=go-studio`（包括 day 等查询参数）继续可用。菜单标识 `learning` 不变，原有排序和图标偏好继续适用。移除只改变接入状态，不删除源码和学习数据；恢复后继续学习。
-
-Go 工具链是否安装由实训页面检测。插件“已启用”表示本机功能可访问，不表示编译、测试或竞态检查已经通过。运行课程代码仍由用户点击原运行按钮触发。
-
-## 文件与接入契约
-
-- `integration.json`：本机插件声明，`kind: local`，页面/菜单/能力/API 前缀。
-- `frontend.ts`：异步注册 `studio` 组件。
-- `GoLearningStudio.vue`、`fallback-data.ts`：完整实训界面和已有离线降级数据。
-- `server.ts`：延迟创建服务、注册兼容接口、检查启用状态、等待在途请求关闭。
-- `service.ts`、`routes.ts`、`curriculum.ts`、`types.ts`：插件自有业务、路由、课程与契约。
-
-宿主只在接入定义表、共享清单和服务工厂表登记插件；不再在主入口创建 Go 服务，也不在固定面板/导航表登记 Go 页面。插件使用通用 `IntegrationHost.rootDirectory` 获取工作台根目录。前端插件入口及 Vue 文件纳入类型检查。
-
-该插件不是 `plugin.json` 声明式记录插件：它包含受信任服务端代码和本机 Go 执行能力，需随源码构建、重启，不通过任意目录执行第三方代码。
-
-## 数据兼容与生命周期
-
-保持原路径，无复制、清空或格式迁移：
-
-- `${DELIVERY_DATA_DIR:-.data}/go-learning/progress.json`：章节、清单、练习和笔记。
-- 同目录 `toolchain/`：隔离的 Go 工具链缓存。
-- `<工作台根目录>/work/go-taskmgr-lab/`：原练习工程、编辑文件及 tasks.json。
-- `<工作台根目录>/work/go-learning-docs/`：原本机详细课程文档；缺少时保留 main 原有内置课程降级。
-- 浏览器原有进度 key 不变。
-
-服务只在首个合法、已启用的请求到来时初始化；停用状态不会创建/重置练习工程。启停/移除仅持久化插件状态，不改变学习记录。请求体读取后再次检查状态，避免停用前挂起的请求在停用后开始保存或执行。已经进入业务操作的请求可以完成；关闭工作台时等待在途请求和进度写入结束，不停止用户自行启动的其他进程。
-
-旧阅读型 `go-seven-days` 自定义插件的独立记录不属于此实训工程，本迁移不覆盖它们。
-
-## 验证
+也可从仓库根目录执行：
 
 ```sh
-node --import tsx --test test/go-learning-plugin.test.ts test/go-learning.test.ts test/integration-plugins.test.ts test/integration-extension-runtime.test.ts test/agent-workspace-navigation.test.ts
+node plugins/go-learning/install.mjs http://localhost:5199 --trust-local-code
+```
+
+本机执行意味着运行可信代码，拥有当前用户文件和网络权限；独立进程不是操作系统安全沙箱。安装脚本只安装已打包并审查的本地文件；重复执行不会重置授权、启停、菜单或数据，不会覆盖不同版本。
+
+打开 `/agent?view=plugins&plugin=go-learning`。主菜单由自定义插件设置控制，支持排序和图标修改。停用、移除和撤回授权沿用通用生命周期。它不再作为 Jira/Confluence 类型的服务接入出现。
+
+## 构建与分发
+
+```sh
+node plugins/go-learning/build.mjs
+```
+
+分发整个 `package/`（plugin.json、ui.js、ui.css、server.mjs）即可添加到支持 hostApi 2 的工作台。构建时依赖仓库 Node 工具链；运行包不导入宿主业务源码或依赖固定仓库路径。
+
+- `application.ts` / `service.ts` / `curriculum.ts`：插件自身业务与课程。
+- `GoLearningStudio.vue` / `markdown/`：独立界面，使用通用 SDK，与工作台主题同步。
+- `bridge.ts`：把页面请求映射到本插件入口。
+- `plugin.json`：能力、应用入口与菜单来源声明。
+- `routes.ts`：保留原实现的路由单元测试适配器，不注册到宿主。
+
+## 数据与兼容
+
+新应用的进度、代码和 Go 缓存存储在 `DELIVERY_DATA_DIR/custom-plugins/data/go-learning/application/`，练习目录在其 `workspace/work/go-taskmgr-lab/`。移除插件保留这些数据，恢复同版本继续使用。
+
+之前固定版的 `.data/go-learning`、`work/go-taskmgr-lab` 和旧 `go-seven-days` 阅读插件的数据保持原样，**不会自动复制或覆盖**。本版本使用独立应用数据；如需迁入历史学习记录，应先核对来源并单独迁移。浏览器旧链接 `/go-studio` 不再作为宿主内置页面；请使用上述自定义插件链接。
+
+插件保留 main 的内置七天课程数据、代码快照和详细文档缺失时的降级逻辑。本机详细课件可放在应用工作目录的 `work/go-learning-docs/`，不依赖分享者的私人目录。
+
+## 宿主接口与验证
+
+通用接口见 [自定义应用插件对接规范](../../docs/custom-plugin-application-api.md)。会话助教经宿主确认后只填入草稿；不会自动发送 AI 请求。打开终端/Cursor 仅限本插件工作目录。
+
+```sh
+node --import tsx --test test/plugin-applications.test.ts test/custom-plugins.test.ts test/go-learning.test.ts
 pnpm build
 ```
 
-覆盖本机无凭据状态、启停/移除/恢复、旧链接、原进度与代码保留、未初始化时的停用、同源和确认限制、请求体等待期间撤回、课程快照/Go 真实执行/HTTP 调试及既有接入插件回归。测试数据使用临时目录，不写用户的学习记录。
+覆盖独立 ID 安装、代码摘要变化、显式信任、进程环境、数据路径、状态/权限撤回、移除恢复、Go 实际运行以及原课程行为。真实 AI 执行和外部服务不属于本次测试。

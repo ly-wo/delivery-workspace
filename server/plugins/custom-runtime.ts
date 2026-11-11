@@ -1,3 +1,4 @@
+import { readApplicationPackage, applicationHashes } from './application-package.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -29,8 +30,9 @@ export async function inspectCustomPlugin(directory: string) {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64_000) throw new Error('plugin.json 必须是小于 64 KB 的普通文件');
   let manifest: CustomPluginManifest;
   try { manifest = pluginManifestSchema.parse(JSON.parse(await fs.readFile(file, 'utf8'))); }
-  catch { throw new Error('插件声明无效：请核对 API 版本、字段、权限和操作；不支持可执行脚本入口'); }
-  return { manifest, source: root, digest: fingerprint(manifest) };
+  catch { throw new Error('插件声明无效：请核对 API 版本、字段、权限和操作；应用入口仅支持 hostApi 2'); }
+  const assets = await readApplicationPackage(root, manifest);
+  return { manifest, source: root, digest: manifest.application ? fingerprint({ manifest, assets: applicationHashes(assets) }) : fingerprint(manifest) };
 }
 const recordSchema = z.object({ id: z.uuid(), values: z.record(z.string(), z.string()), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime() }).strict();
 const installedSchema = z.object({ manifest: pluginManifestSchema, source: z.string(), digest: z.string(), enabled: z.boolean(), showInMenu: z.boolean().default(false), grants: z.array(capabilitySchema), removed: z.boolean().optional() }).strict();
@@ -114,6 +116,11 @@ export async function createCustomPluginRuntime(directory: string, todos: Awaite
   }
   return {
     assertCapability, assertCommand, resource, resolveReference, records,
+    applicationEntry(id: string) {
+      const entry = assertCapability(id, 'application.local');
+      if (!entry.manifest.application) throw new Error('该插件没有应用入口');
+      return { ...entry, packageDirectory: path.join(root, 'packages', id, entry.digest), dataDirectory: path.join(root, 'data', id, 'application') };
+    },
     list(): { navigation: NavigationPreferences; plugins: CustomPluginInfo[]; errors: { id: string; message: string }[] } {
       return { navigation: structuredClone(navigation), plugins: [...installed.values()].filter(entry => !entry.removed).map(entry => structuredClone({ ...entry, error: errors.get(entry.manifest.id) })), errors: [...errors].map(([id, message]) => ({ id, message })) };
     },
@@ -125,21 +132,30 @@ export async function createCustomPluginRuntime(directory: string, todos: Awaite
     }); },
     inspect: inspectCustomPlugin,
     install(raw: unknown) { return serial(async () => {
-      const input = z.object({ directory: z.string(), digest: z.string(), grants: z.array(capabilitySchema), confirmed: z.literal(true), showInMenu: z.boolean().optional() }).strict().parse(raw);
+      const input = z.object({ directory: z.string(), digest: z.string(), grants: z.array(capabilitySchema), confirmed: z.literal(true), showInMenu: z.boolean().optional(), trustedLocalCode: z.literal(true).optional() }).strict().parse(raw);
       const entry = await inspectCustomPlugin(input.directory);
+      if (input.grants.includes('application.local') && !input.trustedLocalCode) throw new Error('需要明确确认信任本机插件代码；它以当前用户权限运行，不是操作系统沙箱');
       if (input.digest !== entry.digest) throw new Error('插件内容已变化，请重新检查并授权');
+      const assets = await readApplicationPackage(entry.source, entry.manifest);
+      if (entry.manifest.application && fingerprint({ manifest: entry.manifest, assets: applicationHashes(assets) }) !== entry.digest) throw new Error('插件内容已变化，请重新检查');
       const previous = installed.get(entry.manifest.id);
       if (previous && !previous.removed) throw new Error('插件 ID 已存在，请勿重复添加');
       if (previous && previous.digest !== entry.digest) throw new Error('存在该插件的历史数据，声明已变化；需要先提供数据迁移，不会覆盖');
       if (input.grants.some(grant => !entry.manifest.permissions.includes(grant))) throw new Error('不能授予插件未声明的能力');
       const installedEntry: Installed = { ...entry, enabled: true, showInMenu: input.showInMenu ?? previous?.showInMenu ?? false, grants: [...new Set(input.grants)] };
+      if (entry.manifest.application) {
+        const target = path.join(root, 'packages', entry.manifest.id, entry.digest);
+        await fs.mkdir(target, { recursive: true, mode: 0o700 });
+        for (const [name, data] of Object.entries(assets)) await fs.writeFile(path.join(target, name), data, { mode: 0o600 });
+      }
       installed.set(entry.manifest.id, installedEntry);
       try { await saveState(); } catch (error) { if (previous) installed.set(entry.manifest.id, previous); else installed.delete(entry.manifest.id); throw error; }
       return this.list();
     }); },
     change(id: string, raw: unknown) { return serial(async () => {
-      const input = z.object({ enabled: z.boolean().optional(), showInMenu: z.boolean().optional(), remove: z.boolean().optional(), grants: z.array(capabilitySchema).optional() }).strict().parse(raw);
+      const input = z.object({ enabled: z.boolean().optional(), showInMenu: z.boolean().optional(), remove: z.boolean().optional(), grants: z.array(capabilitySchema).optional(), trustedLocalCode: z.literal(true).optional() }).strict().parse(raw);
       const current = info(id, false), next = { ...current };
+      if (input.grants?.includes('application.local') && !current.grants.includes('application.local') && !input.trustedLocalCode) throw new Error('需要明确确认信任本机插件代码');
       if (input.grants?.some(grant => !current.manifest.permissions.includes(grant))) throw new Error('不能扩大到未声明的能力');
       if (input.grants) next.grants = [...new Set(input.grants)];
       if (input.enabled !== undefined) next.enabled = input.enabled;

@@ -1,3 +1,4 @@
+import type { PluginApplications } from './applications.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { fingerprint, type CustomPluginRuntime } from './custom-runtime.js';
@@ -6,6 +7,7 @@ export function createCustomPluginRoutes(runtime: CustomPluginRuntime, jira: Plu
   port: number; json(response: ServerResponse, status: number, value: unknown): void;
   body(request: IncomingMessage, limit?: number): Promise<unknown>;
   examples: { name: string; directory: string }[];
+  applications?: PluginApplications;
   citations: (reference: string) => { runId: string; title: string; createdAt: string; url: string }[];
 }) {
   return async (request: IncomingMessage, response: ServerResponse, url: URL) => {
@@ -22,6 +24,7 @@ export function createCustomPluginRoutes(runtime: CustomPluginRuntime, jira: Plu
         if (!id) return send(200, { ...runtime.list(), examples: io.examples });
         if (id === 'resources') return send(200, await runtime.search((url.searchParams.get('q') || '').slice(0, 200), url.searchParams.get('provider') || ''));
         if (id === 'resource') return send(200, await runtime.resolveReference(url.searchParams.get('reference') || ''));
+        if (action === 'application' && io.applications) return send(200, await io.applications.page(id));
         if (action === 'records') return send(200, { items: (await runtime.records(id)).map(item => ({ ...item, version: fingerprint(item) })) });
         if (action === 'record') {
           const recordId = url.searchParams.get('id') || '', resource = await runtime.resource(id, recordId);
@@ -32,11 +35,18 @@ export function createCustomPluginRoutes(runtime: CustomPluginRuntime, jira: Plu
         if (action === 'jira-metadata') return send(200, await jira.metadata(id, url.searchParams.get('project') || '', url.searchParams.get('type') || ''));
         if (action === 'jira-find') return send(200, await jira.find(id, url.searchParams.get('key') || ''));
       } else {
-        const input = await io.body(request, 100_000);
+        const input = await io.body(request, 500_000);
         if (id === 'navigation' && action === 'settings') return send(200, await runtime.saveNavigation(input));
         if (id === 'inspect') return send(200, await runtime.inspect(z.object({ directory: z.string() }).strict().parse(input).directory));
         if (id === 'install') return send(200, await runtime.install(input));
-        if (action === 'change') return send(200, await runtime.change(id, input));
+        if (action === 'change') {
+          const result = await runtime.change(id, input), current = result.plugins.find(p => p.manifest.id === id);
+          if (!current?.enabled || !current.grants.includes('application.local')) io.applications?.stop(id);
+          return send(200, result);
+        }
+        if (action === 'application-call' && io.applications) return send(200, await io.applications.call(id, input));
+        if (action === 'compose' && io.applications) return send(200, await io.applications.compose(id, input));
+        if (action === 'open-workspace' && io.applications) return send(200, await io.applications.open(id, input));
         if (action === 'save') return send(200, await runtime.saveRecord(id, input));
         if (action === 'delete') return send(200, await runtime.removeRecord(id, input));
         if (action === 'jira-link') return send(200, await jira.link(id, input));

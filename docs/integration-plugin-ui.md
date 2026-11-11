@@ -111,9 +111,3 @@ plugins/confluence/
 本次浏览器使用本机模拟 Jira/Confluence，测试数据与账号配置隔离；没有创建真实远端任务、发布真实文档或启动真实 AI。上述结果证明本地接入及受测行为，不代替真实供应商的权限、工作流和字段验收。操作系统钥匙串、原生对话框等能力未新增验证。
 
 最终本地检查：64 项针对性测试通过，`npm run build`（前后端类型检查及 Vite 构建）通过，`git diff --check` 通过。页面使用隔离数据与模拟服务验证，临时服务已停止。未执行全量仓库测试；构建仍有既存的大包体积提示。
-
-## 本机功能插件
-
-Go 实训工坊按同一受信任源码插件机制接入，见 [插件说明](../plugins/go-learning/README.md)。`integration.json` 的 `kind: "local"` 表示不需要远端连接凭据：管理页不显示配置连接按钮，configured/runningConfigured 为 true，仍必须满足 installed 和 runningEnabled 才注册入口和接受请求。此状态不等于 Go 工具链安装成功或实训测试通过。
-
-本机插件配置只接受 enabled/installed，不接收地址和 Token。服务工厂可通过宿主 `rootDirectory` 获取工作台根目录，插件负责原有数据路径与自己的资源关闭。目录和静态声明在插件移除后仍保留，恢复无需复制数据。Go 菜单、组件和 `/api/go-learning/` 接口由插件注册，宿主无固定 Go 入口。

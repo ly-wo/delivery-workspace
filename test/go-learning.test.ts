@@ -6,18 +6,6 @@ import os from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createGoLearningService } from '../plugins/go-learning/service.js';
 import { createGoLearningRoutes } from '../plugins/go-learning/routes.js';
-import { workspaceLocation, workspaceView } from '../src/pages/agent/workspace-navigation.js';
-
-test('Go 实训工坊导航入口与路由映射正确', () => {
-  const view = workspaceView('go-studio');
-  assert.ok(view);
-  assert.equal(view.label, 'Go 实训工坊');
-  assert.deepEqual(workspaceLocation('/go-studio', { day: '3' }), {
-    path: '/agent',
-    query: { day: '3', view: 'go-studio' },
-  });
-});
-
 test('Go 实训工坊服务端支持 7 天课程读取、进度保存、沙盒快照切换、命令运行与 HTTP 调试', async t => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'go-learning-test-'));
   t.after(() => fs.rm(tmpRoot, { recursive: true, force: true }));
