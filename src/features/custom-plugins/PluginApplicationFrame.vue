@@ -45,6 +45,14 @@ async function receive(event: MessageEvent) {
     } else if (data.method === 'workspace.open') {
       await ElMessageBox.confirm('打开此插件工作目录的终端或编辑器？', '打开本机应用', { confirmButtonText: '打开', cancelButtonText: '取消' });
       result = await pluginRequest(`${pluginId}/open-workspace`, data.input);
+    } else if (data.method === 'file.download') {
+      if (typeof data.input?.name !== 'string' || !/^[a-zA-Z0-9_.-]{1,120}$/.test(data.input.name) || typeof data.input.text !== 'string' || data.input.text.length > 4000000) throw new Error('下载文件格式无效');
+      await ElMessageBox.confirm(`保存插件导出的文件 ${data.input.name}？`, '导出文件');
+      const latest = (await pluginRequest()).plugins.find((p: any) => p.manifest.id === pluginId);
+      if (!latest?.enabled || !latest.grants.includes('application.local')) throw new Error('插件已停用或权限已撤回');
+      const url = URL.createObjectURL(new Blob([data.input.text], {type:'text/plain;charset=utf-8'}));
+      const anchor = window.document.createElement('a'); anchor.href = url; anchor.download = data.input.name; anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000); result = {ok:true};
     } else if (data.method === 'clipboard.write') {
       if (typeof data.input?.text !== 'string' || data.input.text.length > 200000) throw new Error('复制内容无效');
       await ElMessageBox.confirm('将插件选中的文本复制到剪贴板？', '复制文本');

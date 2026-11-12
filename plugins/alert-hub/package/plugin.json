@@ -1,0 +1,35 @@
+{
+  "apiVersion": 1,
+  "hostApi": 2,
+  "id": "alert-hub",
+  "name": "告警中心",
+  "version": "1.0.0",
+  "description": "连接 Alert Hub：告警、Case、Todo、团队与通知治理；账号登录，远端写入须确认。",
+  "permissions": [
+    "storage.read",
+    "application.local",
+    "conversation.compose"
+  ],
+  "page": {
+    "title": "告警中心",
+    "kind": "application"
+  },
+  "application": {
+    "frontend": "ui.js",
+    "styles": "ui.css",
+    "backend": "server.mjs"
+  },
+  "records": {
+    "storage": "private",
+    "resourceType": "alert",
+    "fields": [
+      {
+        "key": "title",
+        "label": "标题",
+        "type": "text",
+        "required": true
+      }
+    ]
+  },
+  "commands": []
+}

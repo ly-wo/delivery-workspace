@@ -23,5 +23,6 @@ export const host = {
   request: <T = any>(method: string, input?: unknown) => hostCall<T>('plugin.request', { method, input }),
   compose: (prompt: string, workspacePath?: string) => hostCall('conversation.compose', { prompt, workspacePath }),
   openWorkspace: (app: 'terminal' | 'cursor', workspacePath: string) => hostCall('workspace.open', { app, workspacePath }),
+  download: (name: string, text: string) => hostCall('file.download', { name, text }),
   copy: (text: string) => hostCall('clipboard.write', { text }),
 };

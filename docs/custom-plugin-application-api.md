@@ -102,3 +102,7 @@ await host.copy('需要复制的代码');
 Go 示例：`node plugins/go-learning/build.mjs` 构建独立包，再从自定义插件管理中检查 `plugins/go-learning/package` 的绝对目录，核对来源、授权并添加。也可使用该插件自带安装脚本。构建其他工具时无需改宿主注册表或重编译宿主；只有新增通用宿主协议需要更新宿主。
 
 针对性测试：`node --import tsx --test test/plugin-applications.test.ts test/custom-plugins.test.ts test/go-learning.test.ts`。测试使用临时目录；Go 真实运行结果、浏览器页面结果与操作系统应用打开结果需分别报告。
+
+## 文本文件导出
+
+SDK `host.download(name, text)` 对应前端桥 `file.download`。文件名仅接受 1～120 个英文字母、数字、点、连字符或下划线，文本最多 4,000,000 字符。宿主展示文件名确认，确认后重新检查当前插件仍启用且持有 `application.local`，由浏览器下载 UTF-8 文本。不接受任意磁盘路径，不读取文件，不自动覆盖用户指定的本机文件。插件使用前应确保宿主包含此桥能力；旧宿主会明确返回不支持。

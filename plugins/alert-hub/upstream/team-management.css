@@ -1,0 +1,10 @@
+.team-manage-dialog { width: min(620px, calc(100vw - 32px)); }
+.team-usage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+.team-usage-grid dt { color: var(--muted); font-size: 13px; }
+.team-usage-grid dd { margin: 4px 0 0; font-size: 22px; font-weight: 600; }
+#team-manage-services, #team-manage-name, #team-manage-impact, #team-manage-error { overflow-wrap: anywhere; }
+#teams-table td, #teams-table th { vertical-align: middle; }
+#teams-table td:first-child { min-width: 130px; }
+#team-manage-form select { width: 100%; min-width: 0; }
+dialog form .checkbox-label input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; }
+@media (max-width: 560px) { .team-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

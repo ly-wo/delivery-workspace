@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {createPlugin,endpoint} from '../plugins/alert-hub/application.js';
+import {createCustomPluginRuntime} from '../server/plugins/custom-runtime.js';
+import {createWorkspaceTodos} from '../server/workspace-todos.js';
+import {createPluginApplications} from '../server/plugins/applications.js';
+test('fixed remote, private session, exact preview and non-replayed writes',async()=>{
+ const calls:any[]=[];
+ const plugin=createPlugin({},async(url,init)=>{calls.push({url,init});return new Response('{"ok":true}',{headers:{'Content-Type':'application/json',...(String(url).endsWith('/login')?{'Set-Cookie':'ah_session=test-session; HttpOnly; Secure'}:{})}})});
+ for(const p of ['https://evil.test/api/cases','//evil.test/api/cases','/api/webhooks/tencent-cls','/api/notification-actions/case'])await assert.rejects(plugin.request('request',{path:p}),/路径|清单/);
+ await assert.rejects(plugin.request('request',{path:'/api/cases/c1/ack',method:'POST'}),/确认/);
+ const login:any=await plugin.request('request',{path:'/api/auth/login',method:'POST',body:'{"username":"test","password":"secret"}'});
+ assert.equal(JSON.stringify(login).includes('test-session'),false);
+ const input={path:'/api/cases/c1/ack',method:'POST',body:'{}'};
+ const preview:any=await plugin.request('prepare',input);
+ assert.equal(calls.length,1);
+ await assert.rejects(plugin.request('request',{...input,body:'{"changed":true}',ticket:preview.ticket}),/确认/);
+ const fresh:any=await plugin.request('prepare',input);
+ await plugin.request('request',{...input,ticket:fresh.ticket});
+ assert.equal(calls.length,2);assert.equal(calls[1].url,endpoint+input.path);assert.equal(calls[1].init.headers.Cookie,'ah_session=test-session');assert.equal(calls[1].init.redirect,'error');
+ await assert.rejects(plugin.request('request',{...input,ticket:fresh.ticket}),/确认/);
+ await plugin.close();await assert.rejects(plugin.request('prepare',input),/登录/);
+});
+test('auth errors, CSV and network uncertainty are returned without retry',async()=>{
+ let count=0;const plugin=createPlugin({},async()=>{count++;return new Response('{"error":"login required"}',{status:401})});
+ const response:any=await plugin.request('request',{path:'/api/auth/me'});assert.equal(response.status,401);assert.equal(count,1);
+ const csv=createPlugin({},async()=>new Response('id,title\n1,test',{headers:{'content-type':'text/csv','content-disposition':'attachment; filename="cases.csv"'}}));
+ assert.match((await csv.request('request',{path:'/api/cases/export'}) as any).body,/1,test/);
+ const offline=createPlugin({},async()=>{throw new Error('secret internal detail')});
+ await assert.rejects(offline.request('request',{path:'/api/auth/login',method:'POST',body:'{}'}),/结果未知/);
+});
+test('packaged Alert Hub installs without host registration, data survives disable/remove/restore',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'ah-plugin-'));const runtime=await createCustomPluginRuntime(path.join(root,'plugins'),await createWorkspaceTodos(path.join(root,'todos')));const apps=createPluginApplications(runtime,async()=>{});
+ t.after(async()=>{await apps.close();await runtime.close();await fs.rm(root,{recursive:true,force:true})});
+ const directory=path.resolve('plugins/alert-hub/package'),preview=await runtime.inspect(directory);const input={directory,digest:preview.digest,grants:preview.manifest.permissions,confirmed:true,trustedLocalCode:true,showInMenu:true};
+ await runtime.install(input);assert.equal((await apps.call('alert-hub',{method:'status'}) as any).endpoint,endpoint);
+ const entry=runtime.applicationEntry('alert-hub');await fs.writeFile(path.join(entry.dataDirectory,'test-note.txt'),'preserve');
+ await runtime.change('alert-hub',{enabled:false});apps.stop('alert-hub');await assert.rejects(apps.page('alert-hub'),/停用/);
+ await runtime.change('alert-hub',{remove:true});await runtime.install(input);assert.equal(await fs.readFile(path.join(runtime.applicationEntry('alert-hub').dataDirectory,'test-note.txt'),'utf8'),'preserve');
+});
