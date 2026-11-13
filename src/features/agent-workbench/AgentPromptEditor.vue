@@ -25,11 +25,20 @@ const input = useTemplateRef('input');
 const imageInput = useTemplateRef<HTMLInputElement>('imageInput');
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 const preview = shallowRef(false);
+const mentionPicker = useTemplateRef<HTMLElement>('mentionPicker');
 const noteReference = shallowRef('');
 const attachedFiles = useAgentAttachments(attachments, () => props.disabled, () => props.attachmentDraft);
 const mentions = useAgentMentions(draft, () => ({ workspacePath: props.workspacePath, provider: props.provider,
   modes: props.modes, selectedMode: props.selectedMode, modeLocked: props.modeLocked, businessOptions: props.businessOptions }),
 () => props.disabled || preview.value, (mode) => emit('selectMode', mode));
+watch([() => mentions.activeOption.value?.id, mentions.open], () => {
+  const picker = mentionPicker.value;
+  const active = picker?.querySelector<HTMLElement>('button.active');
+  if (!picker || !active) return;
+  const bounds = picker.getBoundingClientRect(), row = active.getBoundingClientRect();
+  if (row.top < bounds.top) picker.scrollTop -= bounds.top - row.top;
+  else if (row.bottom > bounds.bottom) picker.scrollTop += row.bottom - bounds.bottom;
+}, { flush: 'post' });
 watch(mentions.documentError, error => { if (error) ElMessage.error(error); });
 const mentionGroups = computed(() => {
   const labels: Record<AgentMentionKind, string> = { business: '业务上下文', mode: '模式', skill: 'Skills', file: '文件', note: 'Obsidian 笔记', ...mentions.labels.value };
@@ -48,9 +57,9 @@ function citeNote(reference: string) {
   mentions.select({ id: reference, kind: 'note', label: '', detail: '', value: reference });
 }
 
-async function insertMention() {
+async function insertMention(trigger: '@' | '$' = '@') {
   preview.value = false;
-  mentions.insertTrigger();
+  mentions.insertTrigger(trigger);
   await nextTick();
   input.value?.focus();
 }
@@ -92,7 +101,8 @@ function onDrop(event: DragEvent) { attachedFiles.fromTransfer(event.dataTransfe
 <template>
   <div class="prompt-editor">
     <div class="prompt-tools">
-      <el-button text size="small" :disabled="disabled" @click="insertMention"><AtSign :size="13" /> 选择</el-button>
+      <el-button text size="small" :disabled="disabled" @click="insertMention('@')"><AtSign :size="13" /> 选择</el-button>
+      <el-button text size="small" :disabled="disabled" @click="insertMention('$')">$ Skills</el-button>
       <el-button text size="small" :disabled="!attachedFiles.canAdd.value" :loading="attachedFiles.uploading.value"
         title="添加图片，也可以直接粘贴或拖入" @click="chooseImages">
         <ImagePlus :size="13" /> 图片
@@ -121,7 +131,7 @@ function onDrop(event: DragEvent) { attachedFiles.fromTransfer(event.dataTransfe
       <el-input v-show="!preview" ref="input" v-model="draft" type="textarea" resize="none" :autosize="{ minRows, maxRows }"
         :disabled="disabled" :aria-label="inputLabel" :placeholder="placeholder" @keydown="onKeydown" />
       <div v-if="preview" class="markdown-preview"><AgentMarkdown :source="draft" /></div>
-      <div v-if="mentions.open.value" class="mention-picker" role="listbox" aria-label="选择业务上下文、模式、Skill、文件或文档">
+      <div v-if="mentions.open.value" ref="mentionPicker" class="mention-picker" role="listbox" :aria-label="mentions.prioritizeSkills.value ? '选择 Skill' : '选择业务上下文、模式、文件或文档'">
         <section v-for="group in mentionGroups" :key="group.kind" class="mention-group">
           <header>{{ group.label }}</header>
           <div v-for="option in group.options" :key="option.id" class="mention-option">

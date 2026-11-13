@@ -12,7 +12,7 @@ async function request(action, body) {
 const inspected = await request('inspect', { directory });
 const existing = (await request('')).plugins.find(p => p.manifest.id === inspected.manifest.id);
 if (existing) {
-  if (existing.digest !== inspected.digest) throw new Error('已安装的是不同版本，未覆盖其授权和数据，请先处理版本迁移');
+  if (existing.digest !== inspected.digest) await request('install', { directory, digest: inspected.digest, replaceDigest: existing.digest, grants: existing.grants, confirmed: true, trustedLocalCode: true });
   console.log('插件已添加，保留现有启停、授权与菜单设置。');
 } else {
   await request('install', { directory, digest: inspected.digest, grants: inspected.manifest.permissions, confirmed: true, trustedLocalCode: true, showInMenu: true });

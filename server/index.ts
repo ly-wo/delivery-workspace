@@ -1,3 +1,6 @@
+import { createSpaceCleanup, createUnusedWorkspaceCheck } from './space-cleanup.js';
+import { createSpaceCleanupRoutes } from './space-cleanup-routes.js';
+import { createWorkspaceDiscovery } from './workspace-discovery.js';
 import { createPluginApplications } from './plugins/applications.js';
 import { createCustomPluginRuntime } from './plugins/custom-runtime.js';
 import { createPluginJira } from './plugins/host-jira.js';
@@ -14,6 +17,8 @@ import { z } from 'zod';
 import { createService } from './service.js';
 import { proxySource } from './source-proxy.js';
 import { createSourceBackend } from './source-backend.js';
+import { createCodexSessionSource } from './codex-session-source.js';
+import type { WorkspaceActivity } from '../shared/space-cleanup.js';
 import { createDesignExecutor } from './design-executor/service.js';
 import { createCliQueue } from './cli-queue.js';
 import { createAgentTeamService } from './agent-team-service.js';
@@ -46,7 +51,7 @@ import { createWorkspaceTodoRoutes } from './workspace-todo-routes.js';
 import { createProjectWorkspaces } from './project-workspaces.js';
 import { createProjectWorkspaceRoutes } from './project-workspace-routes.js';
 import { createProjectLaunch, createProjectLaunchRoutes } from './project-launch.js';
-import { createWorkspaceUsageCheck } from './project-workspace-usage.js';
+import { createWorkspaceUsageCheck, readWorkspaceCwds } from './project-workspace-usage.js';
 import { createWorkspaceReports } from './workspace-reports.js';
 import { createWorkspaceReportRoutes } from './workspace-report-routes.js';
 import { readWorkspaceReportSnapshot } from './workspace-report-source.js';
@@ -274,8 +279,26 @@ const workspaceReports = await createWorkspaceReports(path.join(dataDirectory, '
 });
 const workspaceTodoRoutes = createWorkspaceTodoRoutes(workspaceTodos, { json, body, port });
 const overseasRequirementRoutes = createOverseasRequirementRoutes(overseasRequirements, { json, body, port });
+const managedWorkspaceRoot = path.join(dataDirectory, 'agent-runtimes', 'workspaces');
+const cleanupSessionSource = createCodexSessionSource();
+let cleanupLocalSessions: WorkspaceActivity[] = [], cleanupSessionReadFailed = false;
+const readCleanupActivity = () => [...agentRuntimes.workspaceActivity(), ...cleanupLocalSessions];
+const discoverWorkspaceProjects = createWorkspaceDiscovery(refresh => sourceBackend.readLocalProjects(refresh), managedWorkspaceRoot, async () => {
+  // Read metadata only; do not import conversation bodies or change the user's session list.
+  try {
+    cleanupLocalSessions = (await cleanupSessionSource.listSessions()).map(session => ({ path: session.workspacePath,
+      sessionId: session.id, title: session.title, updatedAt: session.updatedAt, active: false, managed: false }));
+    cleanupSessionReadFailed = false;
+  } catch { cleanupLocalSessions = []; cleanupSessionReadFailed = true; }
+  return [root, ...readCleanupActivity().map(activity => activity.path)];
+});
+const readWorkspaceProjects = async (refresh = false) => {
+  const projects = await discoverWorkspaceProjects(refresh);
+  return { ...projects, unreadableCount: (projects.unreadableCount || 0) + Number(cleanupSessionReadFailed) };
+};
 const projectWorkspaces = await createProjectWorkspaces(path.join(dataDirectory, 'project-workspaces'), {
-  readProjects: refresh => sourceBackend.readLocalProjects(refresh),
+  readProjects: readWorkspaceProjects,
+  checkUnused: createUnusedWorkspaceCheck(readCleanupActivity, managedWorkspaceRoot),
   withWorkspace: (directory, owner, action) => agentRuntimes.withTeamWorkspace(directory, owner, action),
   checkBusy: createWorkspaceUsageCheck(() => agentRuntimes.activeWorkspacePaths()),
   protectedPaths: [root, dataDirectory, distDirectory],
@@ -284,6 +307,12 @@ const projectWorkspaces = await createProjectWorkspaces(path.join(dataDirectory,
   canRun: () => !workspaceRestart.isRestarting(),
 });
 const projectWorkspaceRoutes = createProjectWorkspaceRoutes(projectWorkspaces, { json, body, port });
+const spaceCleanup = await createSpaceCleanup(path.join(dataDirectory, 'project-workspaces'), {
+  readProjects: readWorkspaceProjects, readActivity: readCleanupActivity, workspaces: projectWorkspaces,
+  managedRoot: managedWorkspaceRoot, canRun: () => !workspaceRestart.isRestarting(),
+  scanBusy: async () => { const cwds = await readWorkspaceCwds(); return createWorkspaceUsageCheck(() => agentRuntimes.activeWorkspacePaths(), async () => cwds); },
+});
+const spaceCleanupRoutes = createSpaceCleanupRoutes(spaceCleanup, { json, body, port });
 const projectLaunch = createProjectLaunch(path.join(dataDirectory, 'project-launch'), { root, dataDir: dataDirectory, selfPort: port });
 const projectLaunchRoutes = createProjectLaunchRoutes(projectLaunch, { json, body, port });
 const workspaceReportRoutes = createWorkspaceReportRoutes(workspaceReports, { json, body, port });
@@ -442,6 +471,7 @@ async function restartBlockers() {
   const blockers: string[] = [];
   if (pendingMutations) blockers.push('正在处理的请求');
   if (!workspaceReports.isIdle()) blockers.push('任务汇报生成或推送');
+  if (!spaceCleanup.isIdle()) blockers.push('空间清理');
   if (!projectWorkspaces.isIdle()) blockers.push('工作区清理');
   if (projectLaunch.isBusy()) blockers.push('项目启动或配置操作');
   if (!agentRuntimes.isIdle()) blockers.push('Agent 任务或工作区占用');
@@ -517,6 +547,7 @@ const server = http.createServer(async (request, response) => {
       if (url.pathname === '/api/workspace/select') { await workspacePicker(request, response, port); return; }
       if (url.pathname === '/api/workspace/terminal') { await workspaceTerminal(request, response, port); return; }
       if (url.pathname === '/api/workspace/cursor') { await workspaceCursor(request, response, port); return; }
+      if (await spaceCleanupRoutes(request, response, url)) return;
       if (await projectWorkspaceRoutes(request, response, url)) return;
       if (await projectLaunchRoutes(request, response, url)) return;
       if (url.pathname === '/api/plugins' || /^\/api\/plugins\/[^/]+\/(?:configure|test|state)$/.test(url.pathname)) {
@@ -1138,7 +1169,7 @@ const server = http.createServer(async (request, response) => {
 server.listen(port, '127.0.0.1', () => {
   if (process.env.DELIVERY_SCHEDULER_DISABLED !== '1') sourceBackend.start();
 workspaceReports.start();
-  if (process.env.DELIVERY_SCHEDULER_DISABLED !== '1') projectWorkspaces.start();
+  if (process.env.DELIVERY_SCHEDULER_DISABLED !== '1') { projectWorkspaces.start(); spaceCleanup.start(); }
   console.log(`Delivery Workspace: http://localhost:${port} · unified backend · Mastra lab /lab`);
 });
 let shutdownTask: Promise<void> | undefined;
@@ -1148,6 +1179,7 @@ function shutdown() {
     unsubscribeJiraDevRuns(); unsubscribeJiraDevTeams();
     await jiraDevAutomation?.close();
   await projectLaunch.close();
+  await spaceCleanup.close();
   await projectWorkspaces.close();
   await remoteDelivery.close();
   await systemCatalog.close();

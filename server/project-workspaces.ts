@@ -28,6 +28,7 @@ export interface ProjectWorkspaceOptions {
   readProjects(refresh?: boolean): Promise<ProjectsData>;
   withWorkspace<T>(directory: string, owner: string, action: () => Promise<T>): Promise<T>;
   checkBusy(directory: string): Promise<void>;
+  checkUnused?(directory: string, idleBefore?: number): Promise<void>;
   canRun(): boolean;
   protectedPaths: string[];
   workspaceRoots?: string[];
@@ -127,7 +128,7 @@ export async function createProjectWorkspaces(rawDirectory: string, options: Pro
     const [gitStat, commonStat] = await Promise.all([fs.stat(gitDir, { bigint: true }), fs.stat(common, { bigint: true })]);
     return { dev: String(rootStat.dev), ino: String(rootStat.ino), gitDir, gitIno: String(gitStat.ino), common, commonIno: String(commonStat.ino) };
   }
-  async function inspect(raw: string, refresh = false) {
+  async function inspect(raw: string, refresh = false, checkBusy = options.checkBusy) {
     const folder = await location(raw, refresh), id = await identity(folder);
     const snapshot = await readProjectGitSnapshot(folder, { forRemoval: true });
     const linked = id.gitDir !== id.common;
@@ -146,7 +147,7 @@ export async function createProjectWorkspaces(rawDirectory: string, options: Pro
       if (!(await git(folder, ['for-each-ref', '--format=%(refname)', 'refs/remotes'])).trim()) throw error('无法确认远端已保存提交，未执行删除');
       const unique = await git(folder, ['rev-list', '--count', 'HEAD', ...mergeHeads, ...(!linked ? ['--branches', '--tags'] : []), '--not', '--remotes']);
       if (!/^0\s*$/.test(unique)) throw error('工作区有未推送提交，未执行删除');
-      await options.checkBusy(folder);
+      await checkBusy(folder);
     } catch (cause) { reason = cause instanceof Error ? cause.message : '无法确认工作区是否可删除'; }
     const revision = createHash('sha256').update(snapshot.revision).update(JSON.stringify(id)).update(mergeHeads.join(' ')).digest('hex');
     return { folder, id, revision, reason, structuralReason, dirty: !snapshot.clean || snapshot.mergeInProgress, snapshotRevision: snapshot.revision, mergeHeads };
@@ -172,28 +173,34 @@ export async function createProjectWorkspaces(rawDirectory: string, options: Pro
       ...(result.dirty && !result.reason ? { requiresDiscardChanges: true } : {}), ...(reason ? { reason } : {}),
       ...(rule ? { rule: publicRule(rule) } : {}) };
   }
-  async function preview(raw: string): Promise<WorkspaceRemovalPreview> {
+  async function preview(raw: string, checkBusy = options.checkBusy): Promise<WorkspaceRemovalPreview> {
     const rule = rules.find(value => value.path === path.resolve(raw));
     try {
-      return removalPreview(await inspect(raw), rule);
+      return removalPreview(await inspect(raw, false, checkBusy), rule);
     } catch (cause) {
       return { path: raw, revision: '', eligible: false, canSchedule: false, reason: cause instanceof Error ? cause.message : '工作区读取失败',
         ...(rule ? { rule: publicRule(rule) } : {}) };
     }
   }
-  async function erase(raw: string, expected: { revision?: string; identity?: Identity; discardChanges?: true }) {
+  async function erase(raw: string, expected: { revision?: string; identity?: Identity; discardChanges?: true; cleanWorktreeOnly?: boolean; idleBefore?: number }) {
     if (!options.canRun()) throw error('工作台正在停止或重启，请稍后重试');
     const folder = await location(raw, true);
     return options.withWorkspace(folder, `workspace-delete:${randomUUID()}`, () => withProjectGitLock(folder, async () => {
       const refsBefore = await refsDigest(folder);
       const checked = await inspect(folder, true);
       if (checked.reason) throw error(checked.reason);
+      if (expected.cleanWorktreeOnly) {
+        if (checked.id.gitDir === checked.id.common) throw error('空间清理不删除主仓库');
+        if ((await git(folder, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'])).length) throw error('含 Git 忽略文件，空间清理不会删除这些文件');
+        await options.checkUnused?.(folder, expected.idleBefore);
+      }
       if (expected.revision && checked.revision !== expected.revision) throw error('工作区状态已变化，请刷新后重新确认删除');
       if (expected.identity && !sameIdentity(expected.identity, checked.id)) throw error('工作区目录或仓库已被替换，未执行删除');
       if (checked.dirty && !expected.discardChanges) throw error(dirtyReason);
       // 删除前先确认配置可持久化；保存失败时绝不触碰工作区。
       await persist(rules);
       await options.checkBusy(folder);
+      if (expected.cleanWorktreeOnly) await options.checkUnused?.(folder, expected.idleBefore);
       if (!sameIdentity(checked.id, await identity(folder)) || await fs.realpath(folder) !== folder) throw error('工作区目录已变化，未执行删除');
       const quarantine = path.join(path.dirname(folder), `.delivery-delete-${randomUUID()}`);
       const linked = checked.id.gitDir !== checked.id.common;
@@ -211,6 +218,7 @@ export async function createProjectWorkspaces(rawDirectory: string, options: Pro
           throw error('工作区状态已变化，未执行删除');
         }
         await assertGitIdle(gitDir, linked);
+        if (expected.cleanWorktreeOnly && (await git(quarantine, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'])).length) throw error('新增了 Git 忽略文件，未执行清理');
         if (linked) await git(quarantine, ['worktree', 'remove', ...(checked.dirty ? ['--force'] : []), '--', quarantine]);
         else await fs.rm(quarantine, { recursive: true });
       } catch (cause) {
@@ -244,6 +252,10 @@ export async function createProjectWorkspaces(rawDirectory: string, options: Pro
   }
   return {
     preview,
+    async cleanup(raw: unknown) {
+      const input = z.object({ path: z.string().min(1).max(2000), revision: z.string().min(1), idleBefore: z.number().optional() }).strict().parse(raw);
+      return exclusive(async () => ({ path: await erase(input.path, { revision: input.revision, cleanWorktreeOnly: true, idleBefore: input.idleBefore }), deleted: true as const }));
+    },
     list: () => rules.map(publicRule),
     async remove(raw: unknown) {
       const input = workspaceRemovalInputSchema.parse(raw);

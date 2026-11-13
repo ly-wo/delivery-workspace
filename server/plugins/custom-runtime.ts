@@ -114,7 +114,42 @@ export async function createCustomPluginRuntime(directory: string, todos: Awaite
     if (info(id).manifest.records.resourceType !== type) throw new Error('插件资源类型已变化，请重新选择');
     return resource(id, recordId, true);
   }
+  const configurationSalt = randomUUID();
+  const configurationRevision = (values: unknown) => fingerprint({ salt: configurationSalt, values });
+  const configurationFile = (id: string) => path.join(root, 'configuration', pluginIdSchema.parse(id) + '.json');
+  async function configurationValues(id: string) {
+    const entry = info(id, false);
+    const saved = z.record(z.string(), z.string()).parse(await readJson(configurationFile(id), {}));
+    return Object.fromEntries((entry.manifest.configuration?.fields || []).map(f => [f.key, saved[f.key] ?? f.default ?? '']));
+  }
+  async function configuration(id: string) {
+    const entry = info(id, false), values = await configurationValues(id);
+    const fields = entry.manifest.configuration?.fields || [];
+    return { values: Object.fromEntries(fields.filter(f => f.type !== 'password').map(f => [f.key, values[f.key]])),
+      secrets: Object.fromEntries(fields.filter(f => f.type === 'password').map(f => [f.key, !!values[f.key]])),
+      revision: configurationRevision(values) };
+  }
   return {
+    configuration,
+    async applicationConfiguration(id: string) { assertCapability(id, 'application.local'); return configurationValues(id); },
+    configure(id: string, raw: unknown) { return serial(async () => {
+      const entry = info(id, false), fields = entry.manifest.configuration?.fields || [];
+      const input = z.object({ revision: z.string(), values: z.record(z.string(), z.string()), clearSecrets: z.array(z.string()).default([]) }).strict().parse(raw);
+      const previous = await configurationValues(id);
+      if (configurationRevision(previous) !== input.revision) throw new Error('配置已变化，请重新打开配置后保存');
+      if (Object.keys(input.values).some(key => !fields.some(f => f.key === key)) || input.clearSecrets.some(key => !fields.some(f => f.key === key && f.type === 'password'))) throw new Error('包含未声明的配置字段');
+      const next = { ...previous };
+      for (const f of fields) {
+        const value = input.values[f.key];
+        if (value !== undefined && (value.length > 4000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value))) throw new Error(`${f.label}格式或长度无效`);
+        if (f.type === 'password' && f.resetOnChange?.some(key => input.values[key] !== undefined && input.values[key] !== previous[key])) next[f.key] = '';
+        if (value !== undefined && (f.type !== 'password' || value !== '')) next[f.key] = value;
+        if (input.clearSecrets.includes(f.key)) next[f.key] = '';
+        if (f.required && !next[f.key]?.trim()) throw new Error(`请填写${f.label}`);
+      }
+      await privateJson(configurationFile(id), next);
+      return configuration(id);
+    }); },
     assertCapability, assertCommand, resource, resolveReference, records,
     applicationEntry(id: string) {
       const entry = assertCapability(id, 'application.local');
@@ -132,17 +167,23 @@ export async function createCustomPluginRuntime(directory: string, todos: Awaite
     }); },
     inspect: inspectCustomPlugin,
     install(raw: unknown) { return serial(async () => {
-      const input = z.object({ directory: z.string(), digest: z.string(), grants: z.array(capabilitySchema), confirmed: z.literal(true), showInMenu: z.boolean().optional(), trustedLocalCode: z.literal(true).optional() }).strict().parse(raw);
+      const input = z.object({ directory: z.string(), digest: z.string(), grants: z.array(capabilitySchema), confirmed: z.literal(true), showInMenu: z.boolean().optional(), trustedLocalCode: z.literal(true).optional(), replaceDigest: z.string().optional() }).strict().parse(raw);
       const entry = await inspectCustomPlugin(input.directory);
-      if (input.grants.includes('application.local') && !input.trustedLocalCode) throw new Error('需要明确确认信任本机插件代码；它以当前用户权限运行，不是操作系统沙箱');
+      if ((input.grants.includes('application.local') || input.replaceDigest && entry.manifest.application) && !input.trustedLocalCode) throw new Error('需要明确确认信任本机插件代码；它以当前用户权限运行，不是操作系统沙箱');
       if (input.digest !== entry.digest) throw new Error('插件内容已变化，请重新检查并授权');
       const assets = await readApplicationPackage(entry.source, entry.manifest);
       if (entry.manifest.application && fingerprint({ manifest: entry.manifest, assets: applicationHashes(assets) }) !== entry.digest) throw new Error('插件内容已变化，请重新检查');
       const previous = installed.get(entry.manifest.id);
-      if (previous && !previous.removed) throw new Error('插件 ID 已存在，请勿重复添加');
-      if (previous && previous.digest !== entry.digest) throw new Error('存在该插件的历史数据，声明已变化；需要先提供数据迁移，不会覆盖');
+      if (input.replaceDigest && (!previous || previous.removed || previous.digest !== input.replaceDigest)) throw new Error('已安装版本变化，请重新检查后更新');
+      if (input.replaceDigest && previous) {
+        for (const key of ['hostApi', 'records', 'permissions', 'commands', 'page'] as const) if (fingerprint(previous.manifest[key]) !== fingerprint(entry.manifest[key])) throw new Error('更新改变了权限或数据契约，需要显式迁移');
+        for (const field of previous.manifest.configuration?.fields || []) if (!entry.manifest.configuration?.fields.some(f => f.key === field.key && f.type === field.type)) throw new Error('更新不能移除或改变配置字段类型');
+      }
+      if (previous && !previous.removed && !input.replaceDigest) throw new Error('插件 ID 已存在，请勿重复添加');
+      if (previous && previous.digest !== entry.digest && !input.replaceDigest) throw new Error('存在该插件的历史数据，声明已变化；需要先提供数据迁移，不会覆盖');
       if (input.grants.some(grant => !entry.manifest.permissions.includes(grant))) throw new Error('不能授予插件未声明的能力');
       const installedEntry: Installed = { ...entry, enabled: true, showInMenu: input.showInMenu ?? previous?.showInMenu ?? false, grants: [...new Set(input.grants)] };
+      if (input.replaceDigest && previous) Object.assign(installedEntry, { enabled: previous.enabled, showInMenu: previous.showInMenu, grants: previous.grants });
       if (entry.manifest.application) {
         const target = path.join(root, 'packages', entry.manifest.id, entry.digest);
         await fs.mkdir(target, { recursive: true, mode: 0o700 });

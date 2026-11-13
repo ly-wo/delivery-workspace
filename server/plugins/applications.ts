@@ -42,6 +42,7 @@ export function createPluginApplications(runtime: CustomPluginRuntime, open: (ap
       const { entry } = await verified(id);
       const workspaceDirectory = path.join(entry.dataDirectory, 'workspace');
       await fs.mkdir(workspaceDirectory, { recursive: true, mode: 0o700 });
+      const configuration = await runtime.applicationConfiguration(id);
       runtime.applicationEntry(id);
       if (closing || epoch !== (epochs.get(id) || 0)) throw new Error('插件状态已变化');
       const child = fork(fileURLToPath(new URL('./application-worker.mjs', import.meta.url)), [path.join(entry.packageDirectory, 'server.mjs'), entry.dataDirectory, workspaceDirectory], {
@@ -49,6 +50,7 @@ export function createPluginApplications(runtime: CustomPluginRuntime, open: (ap
         env: { PATH: process.env.PATH, HOME: entry.dataDirectory, TMPDIR: process.env.TMPDIR || '/tmp', LANG: 'en_US.UTF-8', SystemRoot: process.env.SystemRoot },
         stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
       });
+      child.send({ type: 'initialize', configuration });
       const worker: Worker = { child, pending: new Map() }; workers.set(id, worker);
       child.on('message', (message: any) => {
         const item = worker.pending.get(message?.id); if (!item) return;

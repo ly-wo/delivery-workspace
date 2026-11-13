@@ -1,44 +1,62 @@
-import { createHash, randomUUID } from 'node:crypto';
-import routes from './routes.json' with {type:'json'};
-export const endpoint = 'https://thor-alert-hub.hahavending.com';
-const patterns = routes.map(([method, path]) => ({method, pattern: new RegExp('^'+path!.replace('{id}', '[a-zA-Z0-9_-]+')+'$')}));
-const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export function createPlugin(_host: unknown, fetchImpl = fetch) {
-  let cookie = '';
-  const tickets = new Map<string,{digest:string;expires:number}>();
-  function validate(raw: any) {
-    if (!raw || typeof raw.path !== 'string' || !raw.path.startsWith('/') || raw.path.startsWith('//') || /[\\\x00-\x20]/.test(raw.path)) throw new Error('请求路径无效');
-    const url = new URL(raw.path,endpoint), method = raw.method || 'GET';
-    if (url.origin !== endpoint || !patterns.some(p=>p.method===method && p.pattern.test(url.pathname)) && !(method==='GET' && ['/samples/generic-alert.json','/samples/tencent-cls.ndjson'].includes(url.pathname))) throw new Error('该操作未在插件接口清单中');
-    if (raw.body !== undefined && (typeof raw.body !== 'string' || Buffer.byteLength(raw.body)>350000)) throw new Error('请求内容过大或格式无效');
-    return {path:url.pathname+url.search,method,body:raw.body as string|undefined};
+import { randomUUID, createHash } from 'node:crypto';
+import { z } from 'zod';
+import type { PluginApplicationHost, PluginMcpConnection, PluginMcpTool } from '../../shared/plugin-application-host.js';
+const callSchema = z.object({ name: z.string().min(1).max(100), arguments: z.record(z.string(), z.unknown()).default({}), ticket: z.string().optional() }).strict();
+// Explicitly audited read operations. MCP annotations alone never authorize a write as a read.
+const readTools = new Set(['get_health', 'get_me', 'get_summary', 'list_cases', 'get_case', 'list_events', 'get_event', 'list_todos', 'get_todo', 'list_owners', 'list_rules', 'dry_run_rule']);
+const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export function createPlugin(host: PluginApplicationHost) {
+  let connection: PluginMcpConnection | undefined, tools: PluginMcpTool[] = [];
+  const tickets = new Map<string, { digest: string; expires: number }>();
+  function config() {
+    const { endpoint, command, username, password } = host.configuration;
+    if (!endpoint || !command || !username?.trim() || !password) throw new Error('请先在设置 → 自定义功能插件 → 告警中心 → 配置中填写 MCP 路径、服务地址和账号密码');
+    const url = new URL(endpoint);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('服务地址必须是无账号、查询参数的 HTTPS 地址');
+    return { endpoint: url.toString().replace(/\/$/, ''), command, username, password };
   }
-  async function send(input: ReturnType<typeof validate>) {
-    let response: Response;
-    try { response=await fetchImpl(endpoint+input.path,{method:input.method,headers:{Accept:'application/json, text/csv, text/plain','Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:input.body,redirect:'error',signal:AbortSignal.timeout(20000)}); }
-    catch { throw new Error(input.method==='GET'?'连接告警中心失败，请检查网络后重试':'请求结果未知，请到告警中心核对后再操作；未自动重试'); }
-    const setCookies=response.headers.getSetCookie();
-    for(const value of setCookies) {const match=/^ah_session=([^;]*)/.exec(value);if(match)cookie=match[1]?`ah_session=${match[1]}`:'';}
-    if(input.path==='/api/auth/logout') {cookie='';tickets.clear();}
-    if(response.status===401) {cookie='';tickets.clear();}
-    const reader=response.body?.getReader();let text='',size=0;const decoder=new TextDecoder();
-    if(reader) {try {while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>4000000){await reader.cancel();throw new Error('响应超过 4 MB，请缩小查询范围');}text+=decoder.decode(value,{stream:true});}text+=decoder.decode();}catch(error){throw new Error(input.method==='GET'?'读取响应失败，请缩小查询范围':'响应读取失败，操作结果未知，请先核对远端状态');}}
-    return {status:response.status,body:text,headers:{'content-type':response.headers.get('content-type')||'application/json','content-disposition':response.headers.get('content-disposition')||''}};
+  function sanitize(value: unknown): any {
+    // Do not leak configured credentials if an upstream error echoes request inputs.
+    const secret = host.configuration.password;
+    if (typeof value === 'string') return secret ? value.split(secret).join('[已隐藏]') : value;
+    if (Array.isArray(value)) return value.map(sanitize);
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitize(item)]));
+    return value;
   }
-  return {async request(method:string, raw:any) {
-    if(method==='status')return {endpoint,authenticated:!!cookie};
-    const input=validate(raw);
-    const login=['/api/auth/login','/api/auth/logout'].includes(input.path);
-    if(method==='prepare') {
-      if(input.method==='GET'||login)throw new Error('该操作无需写入预览');
-      if(!cookie)throw new Error('请先登录告警中心');
-      for(const [id,t] of tickets)if(t.expires<Date.now())tickets.delete(id);
-      if(tickets.size>=20)throw new Error('待确认操作过多');
-      const ticket=randomUUID();tickets.set(ticket,{digest:fingerprint(input),expires:Date.now()+120000});
-      return {ticket,endpoint,path:input.path,method:input.method,body:input.path==='/api/auth/password'?'密码修改（不展示密码）':input.body||''};
-    }
-    if(method!=='request')throw new Error('不支持的插件操作');
-    if(input.method!=='GET'&&!login) {const t=tickets.get(raw.ticket);tickets.delete(raw.ticket);if(!t||t.expires<Date.now()||t.digest!==fingerprint(input))throw new Error('写入确认已失效，请重新预览');}
-    return send(input);
-  },async close(){cookie='';tickets.clear();}};
+  async function connect() {
+    if (connection) return connection;
+    const c = config();
+    connection = await host.mcp.connect({ command: c.command, env: { ALERT_HUB_MCP_URL: c.endpoint, ALERT_HUB_MCP_USERNAME: c.username, ALERT_HUB_MCP_PASSWORD: c.password } });
+    try { tools = await connection.listTools(); } catch (error) { await connection.close(); connection = undefined; throw error; }
+    return connection;
+  }
+  function readonly(tool: PluginMcpTool) { return readTools.has(tool.name) && tool.annotations?.readOnlyHint === true; }
+  return {
+    async close() { tickets.clear(); await connection?.close(); connection = undefined; tools = []; },
+    async request(method: string, raw?: unknown): Promise<any> {
+      if (method === 'status') return { configured: !!(host.configuration.endpoint && host.configuration.command && host.configuration.username && host.configuration.password), endpoint: host.configuration.endpoint || '', transport: 'stdio MCP' };
+      if (method === 'reconnect') { tickets.clear(); await connection?.close(); connection = undefined; tools = []; await connect(); return { connected: true }; }
+      const client = await connect();
+      if (method === 'tools') return sanitize(tools.map(t => ({ ...t, readOnly: readonly(t) })));
+      if (!['read', 'prepare', 'commit'].includes(method)) throw new Error('插件操作不存在');
+      const input = callSchema.parse(raw), tool = tools.find(t => t.name === input.name);
+      if (!tool) throw new Error('MCP 未提供此工具');
+      const signature = digest({ name: input.name, arguments: input.arguments });
+      if (method === 'prepare') {
+        if (readonly(tool)) throw new Error('只读工具无需写入确认');
+        for (const [key, ticket] of tickets) if (ticket.expires < Date.now()) tickets.delete(key);
+        if (tickets.size >= 20) throw new Error('待确认操作过多，请重新连接');
+        const ticket = randomUUID(); tickets.set(ticket, { digest: signature, expires: Date.now() + 120000 });
+        return { ticket, name: input.name, arguments: sanitize(input.arguments) };
+      }
+      if (method === 'read' && !readonly(tool)) throw new Error('该操作会修改远端数据，请预览并确认');
+      if (method === 'commit') {
+        const ticket = tickets.get(input.ticket || ''); tickets.delete(input.ticket || '');
+        if (!ticket || ticket.digest !== signature || ticket.expires < Date.now()) throw new Error('确认已失效或参数已变化，请重新预览');
+      }
+      const result = sanitize(await client.callTool(input.name, input.arguments));
+      if (result?.isError) throw new Error(result.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') || 'MCP 工具执行失败');
+      return result?.structuredContent ?? result?.content?.filter((c: any) => c.type === 'text').map((c: any) => { try { return JSON.parse(c.text); } catch { return c.text; } }) ?? result;
+    },
+  };
 }

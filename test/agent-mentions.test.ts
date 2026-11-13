@@ -3,24 +3,7 @@ import { integrationCatalog } from '../shared/integration-plugins.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { effectScope, nextTick, shallowRef } from 'vue';
-import { shouldPrioritizeSkillMentions, useAgentMentions } from '../src/features/agent-workbench/useAgentMentions.js';
-
-test('@apex 有 Skill 命中时优先展示 Skills', () => {
-  assert.equal(shouldPrioritizeSkillMentions('apex'), true);
-  assert.equal(shouldPrioritizeSkillMentions('hardcode'), true);
-  assert.equal(shouldPrioritizeSkillMentions(''), false);
-});
-
-test('明确业务查询仍优先展示 Jira 和业务上下文', () => {
-  assert.equal(shouldPrioritizeSkillMentions('jira'), false);
-  assert.equal(shouldPrioritizeSkillMentions('项目:apex'), false);
-  assert.equal(shouldPrioritizeSkillMentions('接口'), false);
-  assert.equal(shouldPrioritizeSkillMentions('合入:REQ-008'), false);
-  assert.equal(shouldPrioritizeSkillMentions('APEX-263'), false);
-  assert.equal(shouldPrioritizeSkillMentions('REQ-CU-021'), false);
-  assert.equal(shouldPrioritizeSkillMentions('文档:技术方案'), false);
-  assert.equal(shouldPrioritizeSkillMentions('confluence:需求'), false);
-});
+import { useAgentMentions } from '../src/features/agent-workbench/useAgentMentions.js';
 
 test('明确文档查询使用当前工作区范围，选择后写入可由后端解析的 Confluence 引用', async () => {
   const original = globalThis.fetch;
@@ -68,4 +51,20 @@ test('输入法确认键不选中 @ 候选，合成结束后的 Enter 仍正常�
     assert.deepEqual(selected, ['agent']);
     assert.equal(draft.value, '');
   } finally { scope.stop(); }
+});
+
+
+test('$ 只列出 Skills，切换为同查询 @ 后不显示 Skills，向上循环选择末项', async () => {
+ const original=globalThis.fetch;globalThis.fetch=async()=>Response.json({skills:[{invocation:'demo',name:'demo',description:'Demo'}],files:['demo.ts'],notes:[]});
+ const scope=effectScope(),draft=shallowRef('');
+ const mentions=scope.run(()=>useAgentMentions(draft,()=>({workspacePath:'/workspace',provider:'codex',modes:['agent','ask']}),()=>false,()=>{},shallowRef([])))!;
+ try {
+  draft.value='$';await nextTick();await new Promise(r=>setTimeout(r,220));
+  assert.deepEqual(mentions.options.value.map(o=>o.kind),['skill']);mentions.select(mentions.options.value[0]);assert.equal(draft.value,'$demo ');
+  draft.value='@';await nextTick();await new Promise(r=>setTimeout(r,220));
+  assert.ok(mentions.options.value.every(o=>o.kind!=='skill'));
+  mentions.handleKeydown({key:'ArrowUp',preventDefault(){}} as KeyboardEvent);assert.equal(mentions.activeOption.value.id,'file:demo.ts');
+  mentions.handleKeydown({key:'ArrowDown',preventDefault(){}} as KeyboardEvent);assert.equal(mentions.activeOption.value.id,'mode:agent');
+  draft.value='$';await nextTick();await new Promise(r=>setTimeout(r,220));assert.deepEqual(mentions.options.value.map(o=>o.kind),['skill']);
+ } finally {scope.stop();globalThis.fetch=original;}
 });

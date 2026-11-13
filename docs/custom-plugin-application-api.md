@@ -43,7 +43,7 @@
 
 `records` 保留既有私有记录和资源引用契约；应用自己的课程、状态、逻辑由包负责，不应通过宿主固定 ID 或固定课程字段接入。
 
-检查摘要包含校验后的声明及三个入口的 SHA-256。确认添加时重新读取并核对，复制到安装目录形成快照。之后来源目录变更不会自动生效；加载时校验已安装包，损坏则拒绝执行。同 ID 不同摘要拒绝直接覆盖，升级需明确设计数据迁移；目前不提供静默升级。
+检查摘要包含校验后的声明及三个入口的 SHA-256。确认添加时重新读取并核对，复制到安装目录形成快照。之后来源目录变更不会自动生效；加载时校验已安装包，损坏则拒绝执行。同 ID 不同摘要默认拒绝覆盖；可使用下文的显式兼容更新。改变数据或权限契约仍需设计迁移，不提供静默升级。
 
 ## 后端入口
 
@@ -106,3 +106,57 @@ Go 示例：`node plugins/go-learning/build.mjs` 构建独立包，再从自定�
 ## 文本文件导出
 
 SDK `host.download(name, text)` 对应前端桥 `file.download`。文件名仅接受 1～120 个英文字母、数字、点、连字符或下划线，文本最多 4,000,000 字符。宿主展示文件名确认，确认后重新检查当前插件仍启用且持有 `application.local`，由浏览器下载 UTF-8 文本。不接受任意磁盘路径，不读取文件，不自动覆盖用户指定的本机文件。插件使用前应确保宿主包含此桥能力；旧宿主会明确返回不支持。
+
+
+## 通用配置（记录插件与应用插件均可声明）
+
+在 manifest 增加可选 `configuration`，不声明时保持旧包摘要兼容：
+
+```json
+"configuration": { "fields": [
+  { "key": "endpoint", "label": "服务地址", "type": "text", "required": true, "default": "https://example.com" },
+  { "key": "username", "label": "账号", "type": "text", "required": true },
+  { "key": "password", "label": "密码", "type": "password", "required": true, "resetOnChange": ["endpoint", "username"] }
+] }
+```
+
+最多 20 个唯一字段，支持 `text`/`password`、`required`、`description`、普通字段 `default`；密码禁止默认值。`resetOnChange` 为密码绑定的普通字段：任一变化会清除旧密码，要求重新输入必填密码，避免将旧认证带到新站点。每值最长 4000 字符。
+
+插件管理页根据声明提供配置表单，无须修改宿主页面。`GET /:id/configuration` 返回 `{values,secrets,revision}`：values 仅普通值，secrets 仅是否已设置的布尔值。`POST /:id/configure` 接受 `{values,revision,clearSecrets?:string[]}`；未传值保留，密码空串保留，显式 clearSecrets 清除（必填值不能清空）。旧 revision 保存被拒绝，不覆盖并发修改。重启宿主后需重新获取 revision。
+
+保存具有原有本机同源、JSON、确认头保护；拒绝未声明字段。停用插件可配置，移除插件不可访问。配置位于 `.data/custom-plugins/configuration/<id>.json`，原子替换、0600，**未提供磁盘加密**。移除保留文件；备份与分享不得包含该目录。
+
+保存成功停止该插件旧进程及排队调用。新的后端 `createPlugin(host)` 可通过只读 `host.configuration` 获取当前配置快照，包括密钥。配置通过 IPC 送入插件，不放到进程参数或浏览器桥中。可信插件须保证返回值及错误不泄露密钥；宿主不会自动过滤任意业务返回。记录插件可使用管理 API 保存配置，但不具备本机后端执行能力。
+
+## 通用 stdio MCP（应用后端）
+
+公开类型在 `shared/plugin-application-host.ts`，仅作为编译期契约。使用已授权的 `application.local` 运行本机程序，无 shell，不继承宿主认证环境：
+
+```js
+export function createPlugin(host) {
+  let connection;
+  return {
+    async request(method, input) {
+      connection ||= await host.mcp.connect({
+        command: host.configuration.command, // 必须绝对路径
+        args: [], env: { SERVICE_TOKEN: host.configuration.token }
+      });
+      if (method === 'tools') return connection.listTools();
+      throw new Error('业务调用须由插件检查工具、参数与确认状态');
+    },
+    async close() { await connection?.close(); }
+  };
+}
+```
+
+`connect` 初始化并协商 MCP `2025-03-26` tools 能力；`listTools()` 自动分页，最多 500 个工具；`callTool(name,args)` 返回原始 MCP result（插件必须检查 `isError`），`close()` 幂等关闭连接。stdio 使用换行 JSON-RPC，参照 [官方传输规范](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports) 和 [生命周期](https://modelcontextprotocol.io/specification/2025-03-26/basic/lifecycle)。不声明 sampling/elicitation/roots，不代用户授权外部写入；工具 annotations 不是可信权限来源。
+
+请求默认 30 秒，可设置 100～55000 ms；传输错误、超时不重试、不重放。协议错误不回传敏感细节，stderr 不转发；进程退出提示检查路径、认证及服务。响应缓冲限制 20 MB，待处理请求上限 16。失败连接需显式重建；超时不代表远端未执行。
+
+插件负责业务工具白名单、参数解释、读取结果和写入前确认。宿主负责所有已创建连接的关闭，插件停用/移除/撤权/超时或宿主退出时终止 MCP 子进程。单纯菜单隐藏不会停止。macOS/Linux 进程组行为已覆盖；Windows 子进程树仍需平台验证。
+
+## 显式兼容更新
+
+`POST /install` 可额外传 `replaceDigest`（当前安装摘要）及重新检查的新 `digest`。已安装摘要变化则拒绝。本机包更新必须 `trustedLocalCode:true`；原授权、启停、菜单和数据保持不变。
+
+兼容更新要求 `hostApi`、`records`、`permissions`、`commands`、`page` 完全相同；已有配置字段不得移除或改变类型。可增加配置字段、升级代码/版本/描述。其他更改需单独迁移。成功后停止旧插件进程，新请求启动新包。管理页检查同 ID 包后显示明确更新按钮，不会隐式重置权限。

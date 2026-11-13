@@ -4,7 +4,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createWorkspaceAppRoute, createWorkspaceTerminalRoute, openWorkspaceCursor, prepareCursorWorkspace } from '../server/workspace-terminal.js';
+import { createWorkspaceAppRoute, createWorkspaceTerminalRoute, openWorkspaceCursor, prepareCursorWorkspace, openWorkspaceTerminal, resolveDefaultTerminal } from '../server/workspace-terminal.js';
 
 async function fixture(t: TestContext, app: 'Terminal' | 'Cursor', open: (directory: string) => Promise<void>) {
   const handler = app === 'Terminal' ? createWorkspaceTerminalRoute(open) : createWorkspaceAppRoute(app, open);
@@ -119,8 +119,41 @@ for (const app of ['Terminal', 'Cursor'] as const) {
     fail = true;
     const failed = await post({ workspacePath: os.tmpdir() });
     assert.equal(failed.status, 400);
-    assert.match((await failed.json()).message, new RegExp(app));
+    assert.match((await failed.json()).message, new RegExp(app === 'Terminal' ? '默认终端' : app));
     fail = wait = false;
     assert.equal((await post({ workspacePath: os.tmpdir() })).status, 200);
   });
 }
+
+
+test('终端每次跟随系统默认应用，保留目录参数且清理关联探针', { skip: process.platform !== 'darwin' }, async () => {
+  const directory = "/tmp/中文 空格 ' $(echo unsafe)", probes: string[] = [], opened: string[][] = [];
+  let application = '/Applications/iTerm.app';
+  const executeFile = async (executable: string, args: string[]) => {
+    if (executable === '/usr/bin/osascript') {
+      const probe = args.at(-1)!; probes.push(probe);
+      assert.equal(path.extname(probe), '.command');
+      assert.equal(await fs.readFile(probe, 'utf8'), '');
+      assert.equal((await fs.stat(probe)).mode & 0o111, 0);
+      return { stdout: application + '\n' };
+    }
+    assert.equal(executable, '/usr/bin/open'); opened.push(args); return { stdout: '' };
+  };
+  await openWorkspaceTerminal(directory, { executeFile });
+  application = '/Applications/Other Terminal.app';
+  await openWorkspaceTerminal(directory, { executeFile });
+  assert.deepEqual(opened, [['-a', '/Applications/iTerm.app', directory], ['-a', application, directory]]);
+  for (const probe of probes) await assert.rejects(fs.stat(probe), { code: 'ENOENT' });
+});
+
+test('默认终端识别或打开失败时明确报错，不回退到 Terminal', { skip: process.platform !== 'darwin' }, async () => {
+  for (const output of ['', 'Terminal', '/Applications/App.app\n/unsafe']) {
+    await assert.rejects(resolveDefaultTerminal({ executeFile: async executable => {
+      assert.equal(executable, '/usr/bin/osascript'); return { stdout: output };
+    } }), /未找到系统默认终端/);
+  }
+  await assert.rejects(openWorkspaceTerminal('/tmp', { executeFile: async executable => {
+    if (executable === '/usr/bin/osascript') return { stdout: '/Applications/iTerm.app' };
+    throw new Error('internal native detail');
+  } }), /系统默认终端未能打开/);
+});

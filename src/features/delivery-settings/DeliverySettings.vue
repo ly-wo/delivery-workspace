@@ -18,6 +18,7 @@ import AgentModelDefaultsCard from './AgentModelDefaultsCard.vue';
 import ShareConnectionCard from './ShareConnectionCard.vue';
 import IntegrationPluginsCard from './IntegrationPluginsCard.vue';
 import CustomPluginManager from '../custom-plugins/CustomPluginManager.vue';
+import SpaceCleanup from './SpaceCleanup.vue';
 import WorkspaceReportsCard from './WorkspaceReportsCard.vue';
 
 const integrations = useIntegrationPlugins();
@@ -34,7 +35,7 @@ onMounted(() => {
   settingsResize.observe(settingsRoot.value);
 });
 onBeforeUnmount(() => settingsResize?.disconnect());
-const settingsTabs = ['connections', 'plugins', 'models', 'automation', 'reports', 'runtime'];
+const settingsTabs = ['connections', 'plugins', 'models', 'automation', 'reports', 'cleanup', 'runtime'];
 const activeTab = computed({
   get: () => typeof route.query.settingsTab === 'string' && settingsTabs.includes(route.query.settingsTab) ? route.query.settingsTab : 'connections',
   set: value => { void router.replace({ query: { ...route.query, settingsTab: value } }); },
@@ -301,6 +302,7 @@ async function save() {
         </QueryState>
       </el-tab-pane>
       <el-tab-pane label="自动汇报" name="reports" tabindex="0"><WorkspaceReportsCard /></el-tab-pane>
+      <el-tab-pane label="空间清理" name="cleanup" lazy><SpaceCleanup v-if="activeTab === 'cleanup'" /></el-tab-pane>
       <el-tab-pane label="运行状态" name="runtime" tabindex="0">
         <QueryState :loading="isPending" :error="error" :has-data="!!data" @retry="query.refetch()">
           <div v-if="data">

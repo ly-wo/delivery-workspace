@@ -206,7 +206,7 @@ defineExpose({ focusPrompt, retrySelection });
         :attachment-draft="attachmentDraft"
         :provider="selectedProvider" :modes="automatic ? [] : runtime?.modes || []" :selected-mode="composerMode" mode-locked
         :business-options="businessOptions" :min-rows="3" :max-rows="6" input-label="会话消息"
-        :placeholder="questionReply ? '回复上面的问题（Enter 发送）' : automatic ? '交代目标、补充要求或询问进展…（Enter 发送）' : switchingProvider ? '输入要求，发送后在当前对话切换执行器继续…' : running ? '当前轮执行中；发送后将进入队列' : '继续询问当前会话…（输入 @ 选择业务上下文、模式、Skill 或文件，Enter 发送）'" submit-on-enter @submit="submit()" />
+        :placeholder="questionReply ? '回复上面的问题（Enter 发送）' : automatic ? '交代目标、补充要求或询问进展…（Enter 发送）' : switchingProvider ? '输入要求，发送后在当前对话切换执行器继续…' : running ? '当前轮执行中；发送后将进入队列' : '继续询问当前会话…（输入 @ 选择业务上下文、模式或文件，输入 $ 选择 Skill，Enter 发送）'" submit-on-enter @submit="submit()" />
       <div class="composer-footer">
         <span>{{ questionReply ? questionReply.state === 'pending' ? '发送将回复所选问题' : '取消回复后可继续交代任务' : automatic ? '负责人协调分工，并反馈要求何时生效' : switchingProvider ? running ? '发送后排队，在当前轮结束后切换执行器继续当前对话' : '发送后切换执行器继续当前对话' : running ? hasContent ? canInsertCurrent ? '发送将排队 · 插入补充到当前轮（沿用当前模型与权限）' : '发送后将等待上一轮完成' : '当前轮执行中 · 输入消息后可排队' : writable ? selectedAccessMode === 'full' ? 'Agent 会话 · 可访问本机文件与网络' : 'Agent 会话 · 可修改所选工作区' : '只读会话 · 不修改工作区或外部系统' }}</span>
         <div class="composer-actions">

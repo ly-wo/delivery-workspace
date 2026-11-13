@@ -7,18 +7,27 @@ export const pluginFieldSchema = z.object({
   options: z.array(z.object({ value: z.string().max(80), label: z.string().min(1).max(80) }).strict()).max(20).optional(),
   maxLength: z.number().int().min(1).max(8000).default(2000), default: z.string().max(8000).default(''),
 }).strict().refine(field => field.type !== 'select' || !!field.options?.length, '选择字段必须声明选项');
+export const pluginConfigurationFieldSchema = z.object({
+  key: z.string().regex(/^[a-z][a-zA-Z0-9]{0,39}$/).refine(key => !['constructor', 'prototype', '__proto__'].includes(key)),
+  label: z.string().min(1).max(80), type: z.enum(['text', 'password']),
+  description: z.string().max(500).optional(), required: z.boolean().default(false),
+  default: z.string().max(4000).optional(), resetOnChange: z.array(z.string()).max(20).optional(),
+}).strict().refine(field => field.type !== 'password' || field.default === undefined, '密码不得声明默认值');
 export const pluginManifestSchema = z.object({
   apiVersion: z.literal(1), id: pluginIdSchema, name: z.string().min(1).max(80), version: z.string().regex(/^\d+\.\d+\.\d+$/),
   hostApi: z.union([z.literal(1), z.literal(2)]), description: z.string().max(1000),
   permissions: z.array(capabilitySchema).max(10),
   page: z.object({ title: z.string().min(1).max(80), kind: z.enum(['records', 'application']) }).strict(),
   application: z.object({ frontend: z.literal('ui.js'), styles: z.literal('ui.css'), backend: z.literal('server.mjs') }).strict().optional(),
+  configuration: z.object({ fields: z.array(pluginConfigurationFieldSchema).min(1).max(20) }).strict().optional(),
   records: z.object({ storage: z.enum(['private', 'workspace.todos']), resourceType: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
     fields: z.array(pluginFieldSchema).min(1).max(15), }).strict(),
   commands: z.array(z.object({ id: z.string().regex(/^[a-z][a-z0-9-]*$/), label: z.string().min(1).max(80),
     action: z.enum(['jira.link', 'jira.create', 'conversation.context']) }).strict()).max(10).default([]),
 }).strict().superRefine((m, ctx) => {
   const error = (message: string) => ctx.addIssue({ code: 'custom', message });
+  if (m.configuration && new Set(m.configuration.fields.map(f => f.key)).size !== m.configuration.fields.length) error('配置字段不能重复');
+  for (const field of m.configuration?.fields || []) if (field.resetOnChange?.some(key => field.type !== 'password' || !m.configuration?.fields.some(f => f.key === key && f.type !== 'password'))) error('密码绑定字段必须是已声明的普通配置字段');
   if (m.page.kind === 'application') {
     if (m.hostApi !== 2 || !m.application || !m.permissions.includes('application.local') || m.records.storage !== 'private') error('应用插件需要 hostApi 2、应用入口、本机执行声明和私有存储');
   } else if (m.hostApi !== 1 || m.application || m.permissions.includes('application.local')) error('记录插件使用 hostApi 1 且不支持可执行入口');

@@ -113,7 +113,7 @@ defineExpose({ focusPrompt });
           </div>
           <AgentPromptEditor ref="promptEditor" v-model="objective" v-model:attachments="attachments" class="new-prompt" :workspace-path="workspacePath" :provider="provider" :modes="runtime?.modes || []"
             :attachment-draft="attachmentDraft"
-            :selected-mode="mode" :business-options="businessOptions" :disabled="!!changing" :placeholder="'随心输入，输入 @ 可选择 Jira、项目、接口、模式、Skill 或文件…'" submit-on-enter
+            :selected-mode="mode" :business-options="businessOptions" :disabled="!!changing" :placeholder="'随心输入，输入 @ 可选择 Jira、项目、接口、模式或文件，输入 $ 选择 Skill…'" submit-on-enter
             @select-mode="mode = $event" @submit="submit" />
           <div class="composer-actions">
             <div class="composer-mode">

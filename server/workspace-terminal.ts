@@ -1,17 +1,44 @@
-/** 仅将已验证目录交给固定本机应用；不提供命令执行接口，不拼接 shell，普通目录无需 Git。 */
+/** 仅将已验证目录交给本机应用；不提供命令执行接口，不拼接 shell，普通目录无需 Git。 */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { CursorDesktopError, openCursorEditor } from './cursor-desktop.mjs';
 
 const exec = promisify(execFile);
 type WorkspaceApp = 'Terminal' | 'Cursor';
-export async function openWorkspaceTerminal(directory: string) {
-  if (process.platform !== 'darwin') throw new Error('当前打开工作区功能仅支持 macOS');
-  await exec('/usr/bin/open', ['-a', 'Terminal', directory], { timeout: 10_000 });
+// macOS terminal applications register the default handler for .command files.
+// Ask Launch Services instead of guessing from installed apps or the parent shell.
+const locateDefaultTerminal = `ObjC.import('AppKit');
+function run(args) {
+  const app = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.fileURLWithPath(args[0]));
+  return app.isNil() ? '' : ObjC.unwrap(app.path);
+}`;
+type ExecuteFile = (executable: string, args: string[], options: { timeout: number; encoding: 'utf8'; maxBuffer?: number }) => Promise<{ stdout: string }>;
+export class WorkspaceTerminalError extends Error {}
+export async function resolveDefaultTerminal({ executeFile = exec as ExecuteFile } = {}) {
+  if (process.platform !== 'darwin') throw new WorkspaceTerminalError('当前打开工作区功能仅支持 macOS');
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'delivery-terminal-'));
+  try {
+    // This empty, non-executable file is only used to resolve its default app.
+    // Never open or execute the probe, and never create scripts in the workspace.
+    const probe = path.join(temporaryDirectory, 'default.command');
+    await fs.writeFile(probe, '', { flag: 'wx', mode: 0o600 });
+    const application = await executeFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', locateDefaultTerminal, probe], { encoding: 'utf8', timeout: 5000, maxBuffer: 64 * 1024 })
+      .then(result => result.stdout.trim(), () => '');
+    if (!path.isAbsolute(application) || !application.endsWith('.app') || /[\u0000-\u001f\u007f]/.test(application)) {
+      throw new WorkspaceTerminalError('未找到系统默认终端，请先在终端应用中设置默认终端后重试');
+    }
+    return application;
+  } finally { await fs.rm(temporaryDirectory, { recursive: true, force: true }); }
+}
+export async function openWorkspaceTerminal(directory: string, { executeFile = exec as ExecuteFile } = {}) {
+  const application = await resolveDefaultTerminal({ executeFile });
+  try { await executeFile('/usr/bin/open', ['-a', application, directory], { encoding: 'utf8', timeout: 10_000 }); }
+  catch { throw new WorkspaceTerminalError('系统默认终端未能打开，请检查默认终端应用是否可用'); }
 }
 
 export async function prepareCursorWorkspace(directory: string, workspaceDirectory: string) {
@@ -71,7 +98,7 @@ export function createWorkspaceAppRoute(app: WorkspaceApp, open: (directory: str
       send(200, app === 'Terminal' ? '已打开工作区终端' : '已在 Cursor 中打开工作区');
     } catch (error) {
       send(400, ownsOpening ? app === 'Cursor' ? (error instanceof CursorDesktopError ? error.message : 'Cursor 未能打开，请检查工作区是否可访问')
-        : '终端未能打开，请检查本机 Terminal 是否可用' : error instanceof Error ? error.message : `打开${label}失败`);
+        : (error instanceof WorkspaceTerminalError ? error.message : '系统默认终端未能打开，请检查默认终端应用是否可用') : error instanceof Error ? error.message : `打开${label}失败`);
     } finally { if (ownsOpening) opening = false; }
   };
 }

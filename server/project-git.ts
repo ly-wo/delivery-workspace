@@ -412,9 +412,12 @@ export async function readProjectGitSnapshot(rawDirectory: string, options: { fo
     const stat = await fs.lstat(path.join(directory, file.path), { bigint: true }).catch(() => undefined);
     return stat ? `${file.path}\0${stat.size}\0${stat.mtimeNs}\0${stat.ctimeNs}\0${stat.ino}` : `${file.path}\0missing`;
   }));
-  // 删除会先隔离目录，复核时只忽略本工作区的路径变化。
+  // 删除会先隔离目录；Git 按路径排序 worktree，移动会同时改变路径和输出顺序。
+  // 以记录为单位规范化并排序，只忽略目标路径变化，仍检测其他 worktree 的变化。
   const revisionWorktrees = options.forRemoval
-    ? worktreesOut.split('\0').map(field => field === `worktree ${directory}` ? 'worktree' : field).join('\0')
+    ? worktreesOut.split('\0\0').filter(Boolean)
+      .map(record => record.split('\0').map(field => field === `worktree ${directory}` ? 'worktree' : field).join('\0'))
+      .sort().join('\0\0')
     : worktreesOut;
   const revision = createHash('sha256')
     .update(`${head}\0${indexOut}\0${statusOut}\0${workingFiles.join('\0')}\0${refsOut}\0${revisionWorktrees}\0${mergeOut}\0${JSON.stringify(remotes)}`)

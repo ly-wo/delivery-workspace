@@ -11,7 +11,9 @@
 - `LOCAL_PROJECT_ROOTS`：填写自己的项目目录；多个目录按系统路径分隔符连接。项目根目录需要包含 `.git`。
 - `DELIVERY_SKILLS_ROOT` / `AI_DELIVERY_KIT_ROOT`：默认仓库 `support/skills` / `support/ai-delivery-kit`。无需覆盖全局 Skill。
 
-工作台可手动输入项目路径。macOS 原生文件夹选择器、Terminal.app、钥匙串和桌面 IPC 需要对应系统能力。`pnpm run doctor` 会报告当前可用的执行器。
+工作台可手动输入项目路径。macOS 原生文件夹选择器、系统默认终端、钥匙串和桌面 IPC 需要对应系统能力。`pnpm run doctor` 会报告当前可用的执行器。
+
+“打开终端”跟随 macOS 为 `.command` 文件设置的默认应用（通过 Launch Services 读取），不固定使用 Terminal 或按已安装应用猜测。工作台及自定义插件共用该行为，每次打开时重新读取，改变系统默认后无需重启工作台。读取失败会明确报错，不悄悄回退到 Terminal。希望使用 iTerm2 时，可在 iTerm2 菜单选择 “Make iTerm2 Default Term”；这是 iTerm2 [官方说明](https://iterm2.com/3.4/documentation-menu-items.html)定义的默认终端关联。工作台不会修改系统关联，只把经过校验的目录交给默认应用。
 
 ## 状态备份与版本核对
 
@@ -124,3 +126,14 @@ node --env-file-if-exists=.env --import tsx scripts/integration-execution-progre
 知识笔记在页面选择自己的目录；不要把整个用户主目录当作知识库。已选目录和笔记状态只保存在本机数据中。
 
 Jira、Confluence 的页面和知识入口由插件注册。未接入时不展示对应业务入口，旧链接提供恢复指引。开发契约及迁移验证见 [功能插件装配规范](integration-plugin-ui.md)。
+
+
+## Worktree 空间清理
+
+在“设置 → 空间清理”点击“扫描使用情况”，仅展示会话实际关联的工作区及其磁盘占用、会话名称、会话数、最近使用时间和保护原因。同目录的多个会话合并展示；未关联会话的同仓库其他 worktree 不进入清理列表，源仓库不会仅因派生了会话 worktree 而被列入。扫描会结合本机项目根目录、当前工作台仓库、已有会话源目录，以及本机 Codex 索引返回的未归档会话目录；仅读取会话元数据，不导入正文。扫描不删除文件；扫描范围受现有索引和读取权限限制，无法核验的目录保留。主仓库仅展示，不参与清理或占用合计。占用使用 `du -sk` 估算，要求本机可用 Git、du、lsof；共享 Git 数据不计入释放空间。
+
+选择“可清理”的目录，核对完整路径并确认后才能执行。执行时重新检查会话/进程占用、目录身份、Git 状态和提交保存情况。主仓库、活跃或排队会话、进程占用、未提交/未跟踪文件、Git 忽略文件、stash、Git 操作中及未推送提交的目录都会跳过。提交保存情况按本地远端跟踪引用判断，不自动联网 fetch；需要核对远端最新状态时请先自行 fetch。删除只移除 worktree，保留分支和会话记录；清理后继续旧会话需要重新准备工作区。`node_modules`、`.env` 等忽略文件也会阻止清理，不会被自动丢弃。
+
+周期清理默认关闭，默认闲置期限 7 天、检查间隔 24 小时。启用并保存后，仅处理本工作台在 `${DELIVERY_DATA_DIR:-.data}/agent-runtimes/workspaces` 中创建且能关联到会话记录的 worktree；外部/手工 worktree 和失去会话记录的目录不自动删除。闲置时间取会话更新时间、最近 HEAD reflog 时间、目录创建/修改时间中的最新值。每轮重新扫描、最多清理 100 个，结果保留最近 200 条。
+
+策略和记录保存到 `${DELIVERY_DATA_DIR:-.data}/project-workspaces/space-cleanup.json`。调度只在工作台服务运行且未设置 `DELIVERY_SCHEDULER_DISABLED=1` 时执行；每分钟检查是否到期，重启后到期任务先重新核验。启用或修改策略后，从保存时间重新计算下一次检查时间。

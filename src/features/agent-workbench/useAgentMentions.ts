@@ -1,5 +1,5 @@
 /**
- * 设计说明：@ 选择器统一编排业务上下文、运行模式、Codex Skills 与工作区文件。
+ * 设计说明：@ 选择业务上下文、模式与文件，$ 单独选择 Skills。
  * 模式改变真实运行参数；其他选项只写入可识别引用，不在浏览器读取文件正文或执行业务写操作。
  */
 import { computed, shallowRef, watch, type Ref } from 'vue';
@@ -35,13 +35,6 @@ const modeDetails: Record<AgentRunMode, { label: string; detail: string }> = {
   ask: { label: 'Ask 模式', detail: '只读回答当前问题' },
 };
 
-export function shouldPrioritizeSkillMentions(query: string | undefined) {
-  const term = query?.trim() || '';
-  if (!term) return false;
-  if (/^(?:jira(?:任务)?|项目|接口|合入|文档|confluence)(?:[:：\s]|$)/i.test(term)) return false;
-  return !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*-\d+$/i.test(term);
-}
-
 export function useAgentMentions(draft: Ref<string>, context: () => AgentMentionContext, disabled: () => boolean,
   onSelectMode: (mode: AgentRunMode) => void, providers = useIntegrationPlugins().mentions) {
   const files = shallowRef<string[]>([]);
@@ -53,12 +46,13 @@ export function useAgentMentions(draft: Ref<string>, context: () => AgentMention
   const loading = shallowRef(false);
   const open = shallowRef(false);
   const activeIndex = shallowRef(0);
-  const mentionQuery = computed(() => draft.value.match(/(?:^|\s)@([^\s@"]*)$/)?.[1]);
-  const prioritizeSkills = computed(() => shouldPrioritizeSkillMentions(mentionQuery.value));
+  const triggerMatch = computed(() => draft.value.match(/(?:^|\s)([@$])([^\s@$"]*)$/));
+  const mentionQuery = computed(() => triggerMatch.value?.[2]);
+  const prioritizeSkills = computed(() => triggerMatch.value?.[1] === '$');
   const options = computed<AgentMentionOption[]>(() => {
     const state = context();
     const term = (mentionQuery.value || '').toLowerCase();
-    if (documentProvider(term)) return documents.value;
+    if (!prioritizeSkills.value && documentProvider(term)) return documents.value;
     const availableModes = state.modeLocked && state.selectedMode ? [state.selectedMode] : state.modes;
     const modes = availableModes.filter((mode) => {
       const item = modeDetails[mode];
@@ -76,24 +70,25 @@ export function useAgentMentions(draft: Ref<string>, context: () => AgentMention
     const fileOptions = files.value.map((file) => ({ id: `file:${file}`, kind: 'file' as const, label: file, detail: '工作区文件', value: file }));
     const noteOptions = notes.value.map(note => ({ id: note.reference, kind: 'note' as const, label: note.title, detail: note.path, value: note.reference }));
     return prioritizeSkills.value
-      ? [...skillOptions, ...noteOptions, ...modes, ...fileOptions]
-      : [...business, ...modes, ...skillOptions, ...noteOptions, ...fileOptions];
+      ? skillOptions
+      : [...business, ...modes, ...noteOptions, ...fileOptions];
   });
   const activeOption = computed(() => options.value[activeIndex.value]);
 
-  watch([mentionQuery, () => context().workspacePath, () => context().provider, disabled, providers], ([query, workspace, provider, isDisabled], _previous, onCleanup) => {
+  watch([mentionQuery, () => context().workspacePath, () => context().provider, disabled, providers, prioritizeSkills], ([query, workspace, provider, isDisabled], _previous, onCleanup) => {
     documentError.value = '';
     documents.value = [];
     if (query === undefined || isDisabled) { open.value = false; files.value = []; skills.value = []; notes.value = []; loading.value = false; return; }
     open.value = true;
     activeIndex.value = 0;
     files.value = []; skills.value = []; notes.value = [];
+    const skillOnly = prioritizeSkills.value;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       loading.value = true;
       try {
-        const source = documentProvider(query);
-        if (!source && integrationCatalog.some(plugin => plugin.mention?.prefixes.some(prefix => query.startsWith(prefix + ':') || query.startsWith(prefix + '：')))) { documentError.value = '文档提供者未接入或尚未配置，请在插件管理中检查'; return; }
+        const source = skillOnly ? undefined : documentProvider(query);
+        if (!skillOnly && !source && integrationCatalog.some(plugin => plugin.mention?.prefixes.some(prefix => query.startsWith(prefix + ':') || query.startsWith(prefix + '：')))) { documentError.value = '文档提供者未接入或尚未配置，请在插件管理中检查'; return; }
         if (source) {
           try {
             const data = await source.search(workspace, query.replace(/^[^:：]*[:：]/, ''), controller.signal);
@@ -108,7 +103,7 @@ export function useAgentMentions(draft: Ref<string>, context: () => AgentMention
             if (!response.ok) throw new Error(data.message || '候选项读取失败');
             return data;
           }) : Promise.resolve({ files: [], skills: [] }),
-          noteRequest<{ notes: AgentNote[] }>(`notes?q=${encodeURIComponent(query)}`, undefined, controller.signal),
+          skillOnly ? Promise.resolve({ notes: [] }) : noteRequest<{ notes: AgentNote[] }>(`notes?q=${encodeURIComponent(query)}`, undefined, controller.signal),
         ]);
         if (controller.signal.aborted) return;
         const data = workspaceResult.status === 'fulfilled' ? workspaceResult.value : { files: [], skills: [] };
@@ -125,7 +120,7 @@ export function useAgentMentions(draft: Ref<string>, context: () => AgentMention
   });
 
   function replaceTrigger(replacement = '') {
-    draft.value = draft.value.replace(/(^|\s)@([^\s@"]*)$/, (_match, prefix: string) => `${prefix}${replacement}`);
+    draft.value = draft.value.replace(/(^|\s)[@$]([^\s@$"]*)$/, (_match, prefix: string) => `${prefix}${replacement}`);
   }
 
   function select(option: AgentMentionOption) {
@@ -143,8 +138,8 @@ export function useAgentMentions(draft: Ref<string>, context: () => AgentMention
     open.value = false;
   }
 
-  function insertTrigger() {
-    draft.value = `${draft.value}${draft.value && !/\s$/.test(draft.value) ? ' ' : ''}@`;
+  function insertTrigger(trigger: '@' | '$' = '@') {
+    draft.value = `${draft.value}${draft.value && !/\s$/.test(draft.value) ? ' ' : ''}${trigger}`;
   }
 
   function handleKeydown(event: KeyboardEvent) {

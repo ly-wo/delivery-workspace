@@ -3451,6 +3451,14 @@ export async function createAgentRuntimeService(directory: string, options: Serv
   }
 
   return { dashboard, snapshot, runtimeStatuses, runtimeStatusResult, runtimeStatusVersion: () => runtimeStatusVersion, withProviderMaintenance, recoveryRuns,
+    workspaceActivity: () => [
+      ...runs.flatMap(run => [...new Set([run.workspacePath, ...(run.team?.workspacePaths || [])].filter((folder): folder is string => !!folder))].map(folder => ({
+        path: folder, sessionId: conversationIdFor(run), title: run.objective.slice(0, 120), updatedAt: run.updatedAt,
+        active: activeStatuses.has(run.status) || observingDesktop(run), managed: !!run.isolatedWorkspace && folder === run.workspacePath,
+      }))),
+      ...codexSessions.map(session => ({ path: session.workspacePath, sessionId: session.id, title: session.title,
+        updatedAt: session.updatedAt, active: false, managed: false })),
+    ],
     activeWorkspacePaths: () => runs.filter(run => activeStatuses.has(run.status) || observingDesktop(run))
       .flatMap(run => [run.workspacePath, run.sourceWorkspacePath, ...(run.team?.workspacePaths || [])].filter((value): value is string => !!value)),
     health: runtimeHealth,

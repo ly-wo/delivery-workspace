@@ -24,6 +24,7 @@ export function createCustomPluginRoutes(runtime: CustomPluginRuntime, jira: Plu
         if (!id) return send(200, { ...runtime.list(), examples: io.examples });
         if (id === 'resources') return send(200, await runtime.search((url.searchParams.get('q') || '').slice(0, 200), url.searchParams.get('provider') || ''));
         if (id === 'resource') return send(200, await runtime.resolveReference(url.searchParams.get('reference') || ''));
+        if (action === 'configuration') return send(200, await runtime.configuration(id));
         if (action === 'application' && io.applications) return send(200, await io.applications.page(id));
         if (action === 'records') return send(200, { items: (await runtime.records(id)).map(item => ({ ...item, version: fingerprint(item) })) });
         if (action === 'record') {
@@ -38,7 +39,8 @@ export function createCustomPluginRoutes(runtime: CustomPluginRuntime, jira: Plu
         const input = await io.body(request, 500_000);
         if (id === 'navigation' && action === 'settings') return send(200, await runtime.saveNavigation(input));
         if (id === 'inspect') return send(200, await runtime.inspect(z.object({ directory: z.string() }).strict().parse(input).directory));
-        if (id === 'install') return send(200, await runtime.install(input));
+        if (id === 'install') { const result = await runtime.install(input); for (const plugin of result.plugins) if (plugin.digest === (input as any).digest) io.applications?.stop(plugin.manifest.id); return send(200, result); }
+        if (action === 'configure') { const result = await runtime.configure(id, input); io.applications?.stop(id); return send(200, result); }
         if (action === 'change') {
           const result = await runtime.change(id, input), current = result.plugins.find(p => p.manifest.id === id);
           if (!current?.enabled || !current.grants.includes('application.local')) io.applications?.stop(id);

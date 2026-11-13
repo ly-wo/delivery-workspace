@@ -76,4 +76,4 @@ watch(() => customPlugins.query.data.value, value => {
 defineExpose({ reload });
 </script>
 <template><el-alert v-if="error" :title="error" type="error" :closable="false" /><iframe v-else-if="document" ref="frame" :srcdoc="document" sandbox="allow-scripts" title="自定义应用插件" class="plugin-application" /><el-skeleton v-else :rows="8" animated /></template>
-<style scoped>.plugin-application{border:0;width:100%;min-height:850px;height:calc(100vh - 220px);display:block;color-scheme:normal}</style>
+<style scoped>.plugin-application{border:0;width:100%;min-height:320px;height:calc(100vh - 240px);height:calc(100dvh - 240px);display:block;color-scheme:normal}</style>
